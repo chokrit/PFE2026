@@ -1,0 +1,200 @@
+/* ============================================================
+   organisateur.css — Styles spécifiques au dashboard organisateur
+   ============================================================ */
+
+/* ── Header organisateur ── */
+.orga-header { border-bottom-color: rgba(255, 107, 0, 0.3); }
+
+.orga-badge {
+  background: rgba(255, 107, 0, 0.15);
+  color: #ff6b00;
+  border: 1px solid rgba(255, 107, 0, 0.3);
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  letter-spacing: 0.08em;
+}
+
+/* ── Formulaire de création d'événement ── */
+.orga-form-card {
+  background: var(--dash-card-bg, #12122a);
+  border: 1px solid var(--dash-card-border, #2a2a4a);
+  border-radius: 14px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  border-left: 3px solid var(--dash-accent, #00d4ff);
+}
+
+.orga-form-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--dash-accent, #00d4ff);
+}
+
+/* ── Liste des événements organisateur ── */
+.orga-events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.orga-event-row {
+  background: var(--dash-card-bg, #12122a);
+  border: 1px solid var(--dash-card-border, #2a2a4a);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  transition: border-color .2s;
+}
+
+.orga-event-row:hover {
+  border-color: rgba(0, 212, 255, 0.2);
+}
+
+.orga-event-row__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.orga-event-row__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orga-event-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted, #8888aa);
+}
+
+.orga-present-count {
+  color: var(--dash-green, #00e676);
+  font-weight: 600;
+}
+
+.orga-event-row__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.orga-statut-pill {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.orga-event-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ── Section scanner QR ── */
+.orga-scanner-section { max-width: 600px; }
+
+.orga-scanner-card {
+  background: var(--dash-card-bg, #12122a);
+  border: 1px solid var(--dash-card-border, #2a2a4a);
+  border-radius: 16px;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: center;
+  text-align: center;
+}
+
+.orga-qr-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted, #8888aa);
+}
+
+.orga-qr-hint {
+  font-size: 13px;
+  color: var(--color-text-muted, #8888aa);
+  line-height: 1.6;
+}
+
+.orga-manual-scan {
+  width: 100%;
+  text-align: left;
+}
+
+/* ── Résultat du scan ── */
+.orga-scan-result {
+  width: 100%;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  animation: fadeInScan .3s ease;
+}
+
+@keyframes fadeInScan {
+  from { opacity: 0; transform: scale(.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.orga-scan-result.success {
+  background: rgba(0, 230, 118, 0.1);
+  border: 1px solid rgba(0, 230, 118, 0.4);
+}
+
+.orga-scan-result.error {
+  background: rgba(255, 77, 109, 0.1);
+  border: 1px solid rgba(255, 77, 109, 0.4);
+}
+
+.orga-scan-result__icon {
+  font-size: 28px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.orga-scan-result.success .orga-scan-result__icon { color: var(--dash-green, #00e676); }
+.orga-scan-result.error   .orga-scan-result__icon { color: var(--dash-red, #ff4d6d); }
+
+.orga-scan-result__msg {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.orga-scan-result.success .orga-scan-result__msg { color: var(--dash-green, #00e676); }
+.orga-scan-result.error   .orga-scan-result__msg { color: var(--dash-red, #ff4d6d); }
+
+.orga-scan-result__detail {
+  font-size: 12px;
+  color: var(--color-text-muted, #8888aa);
+  margin-top: 2px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .orga-event-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .orga-event-row__right {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

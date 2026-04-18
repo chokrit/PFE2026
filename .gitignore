@@ -21,3 +21,25 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+# backend
+/backend/node_modules
+/backend/.env
+
+# frontend (sécurité en plus)
+node_modules/
+.env
+
+# logs
+logs
+*.log
+
+# OS / IDE
+.vscode/
+
+
+
+.env.development
+.env.test
+.env.production
+build/
+dist/

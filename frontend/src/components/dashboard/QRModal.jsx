@@ -1,0 +1,1 @@
+export { QRModal as default } from './RewardCard';

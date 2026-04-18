@@ -1,0 +1,178 @@
+/* ============================================================
+   animations.css — Toutes les animations CSS de l'application
+   ============================================================ */
+
+/* ── ANIMATION : Apparition en fondu (fade in) ── */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ── ANIMATION : Rotation complète (pour les orbites) ── */
+@keyframes rotate {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ── ANIMATION : Rotation inverse ── */
+@keyframes rotateReverse {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(-360deg);
+    }
+}
+
+/* ── ANIMATION : Pulsation (scale) ── */
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        transform: scale(1.08);
+        opacity: 0.85;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+/* ── ANIMATION : Pulsation de lueur (glow) ── */
+@keyframes glowPulse {
+    0% {
+        box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 0 30px rgba(0, 212, 255, 0.7), 0 0 60px rgba(0, 212, 255, 0.3);
+    }
+
+    100% {
+        box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+    }
+}
+
+/* ── ANIMATION : Barre de chargement (splash) ── */
+@keyframes loadingBar {
+    0% {
+        width: 0%;
+    }
+
+    100% {
+        width: 100%;
+    }
+}
+
+/* ── ANIMATION : Apparition lettre par lettre ── */
+@keyframes letterAppear {
+    0% {
+        opacity: 0;
+        transform: translateY(30px) scale(0.8);
+    }
+
+    60% {
+        transform: translateY(-5px) scale(1.05);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ── ANIMATION : Flottement (float) ── */
+@keyframes float {
+    0% {
+        transform: translateY(0px);
+    }
+
+    50% {
+        transform: translateY(-12px);
+    }
+
+    100% {
+        transform: translateY(0px);
+    }
+}
+
+/* ── ANIMATION : Slide depuis la droite ── */
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(40px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* ── ANIMATION : Slide depuis la gauche ── */
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translateX(-40px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* ── CLASSES UTILITAIRES D'ANIMATION ── */
+
+/* Appliquer fadeIn avec délai personnalisable */
+.animate-fade-in {
+    animation: fadeIn 0.6s ease forwards;
+}
+
+.animate-fade-in-delay-1 {
+    opacity: 0;
+    animation: fadeIn 0.6s ease 0.2s forwards;
+}
+
+.animate-fade-in-delay-2 {
+    opacity: 0;
+    animation: fadeIn 0.6s ease 0.4s forwards;
+}
+
+.animate-fade-in-delay-3 {
+    opacity: 0;
+    animation: fadeIn 0.6s ease 0.6s forwards;
+}
+
+/* Flottement continu */
+.animate-float {
+    animation: float 3s ease-in-out infinite;
+}
+
+/* Pulsation continue */
+.animate-pulse {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+/* ── TRANSITIONS DE PAGE ── */
+/* Appliquer sur le conteneur principal de chaque page */
+.page-transition {
+    animation: fadeIn 0.4s ease forwards;
+}

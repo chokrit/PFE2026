@@ -1,0 +1,273 @@
+/* ============================================================
+   splash.css — Styles du Splash Screen (Page 1)
+   ============================================================ */
+
+/* ── Conteneur principal plein écran ── */
+.splash-screen {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    position: relative;
+}
+
+/* ── Fond sombre "eventFont" ── */
+.splash-background {
+    width: 100%;
+    height: 100%;
+    background:
+        /* Gradient radial au centre pour l'effet "spotlight" */
+        radial-gradient(ellipse at center, #1a1a3e 0%, #0a0a1a 70%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+/* ── Contenu centré ── */
+.splash-content {
+    text-align: center;
+    z-index: 2;
+    animation: fadeIn 0.8s ease;
+}
+
+/* ── Animation des sportifs ── */
+.sport-animation {
+    width: 220px;
+    height: 220px;
+    margin: 0 auto var(--spacing-lg);
+    position: relative;
+}
+
+/* Conteneur des orbites */
+.orbit-container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ── Orbites ── */
+/* Chaque orbite est un cercle invisible qui tourne */
+.orbit {
+    position: absolute;
+    border-radius: 50%;
+    display: flex;
+    align-items: flex-start;
+    /* La silhouette est au "nord" de l'orbite */
+    justify-content: center;
+}
+
+/* Orbit 1 : grande, rotation lente, couleur cyan */
+.orbit-1 {
+    width: 200px;
+    height: 200px;
+    border: 1px solid rgba(0, 212, 255, 0.2);
+    animation: rotate 8s linear infinite;
+}
+
+/* Orbit 2 : moyenne, rotation plus rapide, rotation inverse */
+.orbit-2 {
+    width: 160px;
+    height: 160px;
+    border: 1px solid rgba(255, 107, 0, 0.2);
+    animation: rotateReverse 6s linear infinite;
+}
+
+/* Orbit 3 : petite */
+.orbit-3 {
+    width: 120px;
+    height: 120px;
+    border: 1px solid rgba(0, 212, 255, 0.15);
+    animation: rotate 10s linear infinite;
+}
+
+/* Orbit 4 : très petite */
+.orbit-4 {
+    width: 80px;
+    height: 80px;
+    border: 1px solid rgba(255, 107, 0, 0.15);
+    animation: rotateReverse 5s linear infinite;
+}
+
+/* ── Silhouettes ── */
+/* Contre-rotation pour que les silhouettes restent verticales */
+.orbit-1 .silhouette {
+    animation: rotateReverse 8s linear infinite;
+    margin-top: -20px;
+}
+
+.orbit-2 .silhouette {
+    animation: rotate 6s linear infinite;
+    margin-top: -20px;
+}
+
+.orbit-3 .silhouette {
+    animation: rotateReverse 10s linear infinite;
+    margin-top: -20px;
+}
+
+.orbit-4 .silhouette {
+    animation: rotate 5s linear infinite;
+    margin-top: -20px;
+}
+
+/* ── Logo central ── */
+.center-logo {
+    position: absolute;
+    width: 50px;
+    height: 50px;
+    background: linear-gradient(135deg, #00d4ff, #0088cc);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: glowPulse 2s ease-in-out infinite;
+    z-index: 3;
+}
+
+.center-letter {
+    font-family: var(--font-family);
+    font-size: 22px;
+    font-weight: 900;
+    color: #0a0a1a;
+}
+
+/* ── Titre "EVENT" ── */
+.splash-title {
+    font-size: clamp(48px, 10vw, 80px);
+    font-weight: 900;
+    letter-spacing: 0.15em;
+    color: transparent;
+    background: linear-gradient(135deg, #00d4ff 0%, #ffffff 50%, #ff6b00 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    margin-bottom: var(--spacing-sm);
+}
+
+/* Apparition lettre par lettre */
+.title-e {
+    display: inline-block;
+    animation: letterAppear 0.5s ease 0.1s both;
+}
+
+.title-v {
+    display: inline-block;
+    animation: letterAppear 0.5s ease 0.2s both;
+}
+
+.title-e2 {
+    display: inline-block;
+    animation: letterAppear 0.5s ease 0.3s both;
+}
+
+.title-n {
+    display: inline-block;
+    animation: letterAppear 0.5s ease 0.4s both;
+}
+
+.title-t {
+    display: inline-block;
+    animation: letterAppear 0.5s ease 0.5s both;
+}
+
+/* ── Tagline ── */
+.splash-tagline {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-lg);
+    font-weight: 300;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    animation: fadeIn 1s ease 0.8s both;
+}
+
+/* ── Barre de chargement ── */
+.splash-loader {
+    width: 150px;
+    height: 2px;
+    background: var(--color-border);
+    border-radius: 2px;
+    margin: var(--spacing-xl) auto 0;
+    overflow: hidden;
+}
+
+.loader-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #00d4ff, #ff6b00);
+    border-radius: 2px;
+    animation: loadingBar 3s linear forwards;
+    /* 3s = durée du splash */
+}
+
+/* ── Sélection de langue ── */
+.lang-select-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg);
+    padding: var(--spacing-lg);
+    animation: fadeIn 0.5s ease;
+}
+
+.lang-select-container {
+    text-align: center;
+    max-width: 420px;
+    width: 100%;
+}
+
+.lang-logo-wrapper {
+    margin-bottom: var(--spacing-lg);
+    animation: float 3s ease-in-out infinite;
+}
+
+.lang-select-title {
+    font-size: var(--font-size-xl);
+    color: var(--color-text);
+    font-weight: 600;
+    line-height: 1.8;
+    margin-bottom: var(--spacing-xl);
+}
+
+/* Grille des boutons de langue */
+.lang-buttons-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-md);
+}
+
+.lang-select-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-lg) var(--spacing-md);
+    background: var(--color-bg-card);
+    border: 2px solid var(--color-border);
+    border-radius: var(--border-radius);
+    color: var(--color-text);
+    cursor: pointer;
+    transition: all var(--transition-med);
+    font-family: var(--font-family);
+}
+
+.lang-select-btn:hover {
+    border-color: var(--color-accent);
+    background: rgba(0, 212, 255, 0.1);
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-card);
+}
+
+.lang-main-label {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.lang-sub-label {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    display: block;
+}

@@ -1,0 +1,254 @@
+/* ============================================================
+   global.css — Styles globaux, reset CSS, variables
+   ============================================================ */
+
+/* ── Variables CSS (thème de l'application) ── */
+:root {
+    /* Couleurs principales */
+    --color-bg: #0a0a1a;
+    /* Fond sombre principal */
+    --color-bg-card: #12122a;
+    /* Fond des cartes/formulaires */
+    --color-bg-input: #1a1a35;
+    /* Fond des champs de saisie */
+    --color-accent: #00d4ff;
+    /* Cyan - couleur d'accent principale */
+    --color-accent-hover: #00b8d9;
+    /* Cyan plus sombre au survol */
+    --color-orange: #ff6b00;
+    /* Orange sport */
+    --color-text: #e8e8f0;
+    /* Texte principal */
+    --color-text-muted: #8888aa;
+    /* Texte secondaire */
+    --color-border: #2a2a4a;
+    /* Bordures subtiles */
+    --color-error: #ff4d6d;
+    /* Rouge pour les erreurs */
+    --color-success: #00e676;
+    /* Vert pour les succès */
+
+    /* Typographie */
+    --font-family: 'Poppins', sans-serif;
+    --font-size-base: 16px;
+    --font-size-sm: 14px;
+    --font-size-lg: 18px;
+    --font-size-xl: 24px;
+    --font-size-xxl: 32px;
+
+    /* Espacements */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 40px;
+
+    /* Bordures et ombres */
+    --border-radius: 12px;
+    --border-radius-sm: 8px;
+    --border-radius-lg: 20px;
+    --shadow-card: 0 8px 32px rgba(0, 212, 255, 0.1);
+    --shadow-btn: 0 4px 15px rgba(0, 212, 255, 0.3);
+
+    /* Transitions */
+    --transition-fast: 0.15s ease;
+    --transition-med: 0.3s ease;
+    --transition-slow: 0.5s ease;
+}
+
+/* ── Reset CSS ── */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* ── Base ── */
+html {
+    font-size: var(--font-size-base);
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: var(--font-family);
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    min-height: 100vh;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Transition douce quand RTL change */
+    transition: direction var(--transition-med);
+}
+
+/* ── Body en mode RTL (arabe) ── */
+body.rtl {
+    direction: rtl;
+    text-align: right;
+}
+
+/* ── Liens ── */
+a {
+    color: var(--color-accent);
+    text-decoration: none;
+    transition: color var(--transition-fast);
+}
+
+a:hover {
+    color: var(--color-accent-hover);
+    text-decoration: underline;
+}
+
+/* ── Boutons de base ── */
+button {
+    cursor: pointer;
+    font-family: var(--font-family);
+    border: none;
+    outline: none;
+    transition: all var(--transition-med);
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* ── Inputs de base ── */
+input,
+textarea,
+select {
+    font-family: var(--font-family);
+    font-size: var(--font-size-base);
+}
+
+/* ── Conteneurs utilitaires ── */
+.page-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: var(--spacing-md);
+}
+
+/* ── Sélecteur de langue (top right) ── */
+.lang-switcher-top {
+    position: fixed;
+    top: var(--spacing-md);
+    right: var(--spacing-md);
+    z-index: 1000;
+}
+
+/* En RTL, mettre à gauche */
+body.rtl .lang-switcher-top {
+    right: auto;
+    left: var(--spacing-md);
+}
+
+/* ── Styles du LanguageSwitcher ── */
+.lang-btn-current {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    padding: 6px 12px;
+    border-radius: var(--border-radius-sm);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+}
+
+.lang-btn-current:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+
+.lang-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-sm);
+    overflow: hidden;
+    min-width: 100px;
+    z-index: 100;
+    margin-top: 4px;
+}
+
+.lang-option {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    color: var(--color-text);
+    text-align: left;
+    font-size: var(--font-size-sm);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.lang-option:last-child {
+    border-bottom: none;
+}
+
+.lang-option:hover {
+    background: var(--color-bg-input);
+    color: var(--color-accent);
+}
+
+/* ── Pages placeholder ── */
+.page-placeholder {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-xl) var(--spacing-md);
+    background: var(--color-bg);
+}
+
+.placeholder-container {
+    text-align: center;
+    max-width: 500px;
+    width: 100%;
+}
+
+.placeholder-title {
+    font-size: var(--font-size-xxl);
+    color: var(--color-accent);
+    margin: var(--spacing-lg) 0;
+    font-weight: 700;
+}
+
+.placeholder-notice {
+    background: var(--color-bg-card);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--border-radius);
+    padding: var(--spacing-lg);
+    margin: var(--spacing-lg) 0;
+    color: var(--color-text-muted);
+}
+
+.link-back {
+    color: var(--color-accent);
+    font-size: var(--font-size-sm);
+    display: inline-block;
+    margin-top: var(--spacing-md);
+}
+
+/* ── Scrollbar personnalisée ── */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--color-accent);
+}

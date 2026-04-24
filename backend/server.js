@@ -1,82 +1,68 @@
 // ============================================================
-// server.js — Point d'entrée principal du serveur Express
-// Lance le serveur, connecte MongoDB, charge les routes
+// server.js — Point d'entrée Express
+// CORRECTIONS :
+//   1. Ajout routes /participations et /recompenses
+//   2. Ajout route /locations pour les listes déroulantes
+//   3. Ajout route /categories pour les sélecteurs
 // ============================================================
 
-// Charger les variables d'environnement depuis .env
 require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
 
-// ── Initialiser l'application Express ──
 const app = express();
 
-// ── Connexion à MongoDB Atlas ──
+// Connexion MongoDB
 connectDB();
 
-// ── Middlewares globaux ──
-
-// CORS : autoriser les requêtes depuis le frontend React (port 5173 en dev)
+// Middlewares globaux
 app.use(cors({
-    origin: process.env.NODE_ENV === 'development'
-        ? 'http://localhost:5173'
-        : '*', // TODO: restreindre en production
-    credentials: true
+  origin: process.env.NODE_ENV === 'development'
+    ? ['http://localhost:5173', 'http://localhost:3000']
+    : '*',
+  credentials: true,
 }));
-
-// Parser les requêtes JSON (body des POST/PUT)
 app.use(express.json());
-
-// Parser les données de formulaires URL-encoded
 app.use(express.urlencoded({ extended: true }));
 
-// ── Routes de l'API ──
-
-// Route de test — vérifier que le serveur tourne
+// ── Route de santé ──
 app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'OK',
-        message: 'EVENT API fonctionne correctement',
-        timestamp: new Date().toISOString()
-    });
+  res.json({ status: 'OK', message: 'EVENT API fonctionne', timestamp: new Date() });
 });
 
-// Routes d'authentification (login, register, forgot-password)
+// ── Routes principales ──
 app.use('/api/auth', require('./routes/auth'));
-
-// Routes utilisateurs (profil, liste admin, etc.)
 app.use('/api/utilisateurs', require('./routes/utilisateurs'));
-
-// Routes événements (liste, création, détail, QR scan)
 app.use('/api/evenements', require('./routes/evenements'));
+app.use('/api/participations', require('./routes/participations'));  // ← NOUVEAU
+app.use('/api/recompenses', require('./routes/recompenses'));     // ← NOUVEAU
+app.use('/api/locations', require('./routes/locations'));       // ← NOUVEAU
+app.use('/api/categories', require('./routes/categories'));      // ← NOUVEAU
 
-// ── Middleware de gestion des erreurs 404 ──
+// ── 404 ──
 app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        message: `Route introuvable : ${req.method} ${req.originalUrl}`
-    });
-});
-app.use('/api/participations', require('./routes/participations'));
-app.use('/api/recompenses', require('./routes/recompenses'));
-// ── Middleware de gestion des erreurs globales ──
-app.use((err, req, res, next) => {
-    console.error('Erreur serveur :', err.stack);
-    res.status(500).json({
-        success: false,
-        message: 'Erreur interne du serveur',
-        // Afficher le détail uniquement en développement
-        error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
+  res.status(404).json({
+    success: false,
+    message: `Route introuvable : ${req.method} ${req.originalUrl}`,
+  });
 });
 
-// ── Démarrer le serveur ──
+// ── Erreurs globales ──
+app.use((err, req, res, next) => {
+  console.error('Erreur serveur:', err.stack);
+  res.status(500).json({
+    success: false,
+    message: 'Erreur interne du serveur',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined,
+  });
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`\n✅ Serveur EVENT démarré`);
-    console.log(`📡 Port : ${PORT}`);
-    console.log(`🌍 Environnement : ${process.env.NODE_ENV}`);
-    console.log(`🔗 URL : http://localhost:${PORT}/api/health\n`);
+  console.log(`\n✅ Serveur EVENT démarré`);
+  console.log(`📡 Port : ${PORT}`);
+  console.log(`🌍 Env  : ${process.env.NODE_ENV}`);
+  console.log(`🔗 URL  : http://localhost:${PORT}/api/health\n`);
 });

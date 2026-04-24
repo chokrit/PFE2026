@@ -1,97 +1,259 @@
 // ============================================================
-// controllers/evenementController.js — Gestion des événements
+// controllers/evenementController.js
+//
+// RÈGLES MÉTIER :
+//   - Tout utilisateur connecté peut CRÉER un événement
+//   - user  → stat_event forcé à 'brouillon' (admin doit publier)
+//   - admin → peut créer directement en 'publié'
+//   - Modifier / Supprimer : créateur OU admin
+//   - Un user ne peut supprimer que SES brouillons
+//   - Seul l'admin peut changer le statut vers 'publié'
 // ============================================================
 
 const Evenement = require('../models/Evenement');
 const Participation = require('../models/Participation');
+const crypto = require('crypto');
 
-// GET /api/evenements — Liste publique des événements publiés
+// ── Formater un événement pour le frontend ──────────────────
+const formater = async (ev) => {
+  const nb = await Participation.countDocuments({ evenement: ev._id });
+  const obj = ev.toObject ? ev.toObject() : ev;
+  return {
+    ...obj,
+    nb_inscrits: nb,
+    lieu: ev.location?.name_location || 'Lieu non défini',
+    categorie: ev.categories?.[0]?.event_type || 'Sport',
+    titre: ev.title_event,
+    description: ev.event_description,
+  };
+};
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/evenements — Événements publiés (public)
+// ─────────────────────────────────────────────────────────────
 const getEvenements = async (req, res) => {
-    try {
-        const evenements = await Evenement.find({ stat_event: 'publié' })
-            .populate('createur', 'first_name last_name')  // Infos basiques du créateur
-            .populate('location', 'name_location gps_coordinates')
-            .populate('categories', 'event_categ event_type')
-            .sort({ ev_start_time: 1 });  // Du plus proche au plus lointain
+  try {
+    const evs = await Evenement.find({ stat_event: 'publié' })
+      .populate('location', 'name_location gps_coordinates')
+      .populate('categories', 'event_type event_categ')
+      .populate('createur', 'first_name last_name')
+      .sort({ ev_start_time: 1 });
 
-        res.json({ success: true, count: evenements.length, evenements });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
+    const resultats = await Promise.all(evs.map(formater));
+    return res.json({ success: true, count: resultats.length, evenements: resultats });
+  } catch (error) {
+    console.error('getEvenements:', error);
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
 };
 
-// POST /api/evenements — Créer un événement
-const creerEvenement = async (req, res) => {
-    try {
-        const evenement = await Evenement.create({
-            ...req.body,
-            createur: req.utilisateur._id,  // L'utilisateur connecté est le créateur
-            stat_event: 'brouillon'          // Toujours brouillon à la création
-        });
+// ─────────────────────────────────────────────────────────────
+// GET /api/evenements/all — Tous les événements (admin)
+// ─────────────────────────────────────────────────────────────
+const getTousEvenements = async (req, res) => {
+  try {
+    const evs = await Evenement.find()
+      .populate('location', 'name_location')
+      .populate('categories', 'event_type')
+      .populate('createur', 'first_name last_name')
+      .sort({ ev_start_time: -1 });
 
-        res.status(201).json({ success: true, message: 'Événement créé', evenement });
-    } catch (error) {
-        if (error.name === 'ValidationError') {
-            const messages = Object.values(error.errors).map(e => e.message);
-            return res.status(400).json({ success: false, message: messages.join(', ') });
-        }
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
+    const resultats = await Promise.all(evs.map(formater));
+    return res.json({ success: true, count: resultats.length, evenements: resultats });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
 };
 
-// GET /api/evenements/:id — Détail d'un événement
+// ─────────────────────────────────────────────────────────────
+// GET /api/evenements/mes-evenements — Mes événements créés
+// ─────────────────────────────────────────────────────────────
+const getMesEvenements = async (req, res) => {
+  try {
+    const evs = await Evenement.find({ createur: req.utilisateur._id })
+      .populate('location', 'name_location')
+      .populate('categories', 'event_type')
+      .sort({ ev_start_time: -1 });
+
+    const resultats = await Promise.all(evs.map(formater));
+    return res.json({ success: true, count: resultats.length, evenements: resultats });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/evenements/:id — Détail
+// ─────────────────────────────────────────────────────────────
 const getEvenement = async (req, res) => {
-    try {
-        const evenement = await Evenement.findById(req.params.id)
-            .populate('createur', 'first_name last_name email')
-            .populate('location')
-            .populate('categories');
-
-        if (!evenement) {
-            return res.status(404).json({ success: false, message: 'Événement introuvable' });
-        }
-
-        // Compter les participants inscrits
-        const nbParticipants = await Participation.countDocuments({ evenement: req.params.id });
-
-        res.json({ success: true, evenement, nbParticipants });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
+  try {
+    const ev = await Evenement.findById(req.params.id)
+      .populate('location')
+      .populate('categories')
+      .populate('createur', 'first_name last_name email');
+    if (!ev) return res.status(404).json({ success: false, message: 'Événement introuvable' });
+    return res.json({ success: true, evenement: await formater(ev) });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
 };
 
-// POST /api/evenements/:id/qr-scan — Valider présence par QR
+// ─────────────────────────────────────────────────────────────
+// POST /api/evenements — Créer un événement
+// ✅ Accessible à TOUT utilisateur connecté
+// ─────────────────────────────────────────────────────────────
+const creerEvenement = async (req, res) => {
+  try {
+    const {
+      title_event, event_description, ev_start_time,
+      ev_end_time, max_participants, location, categories, stat_event,
+    } = req.body;
+
+    if (!title_event || !ev_start_time) {
+      return res.status(400).json({
+        success: false,
+        message: 'Le titre et la date de début sont obligatoires',
+      });
+    }
+
+    // ── RÈGLE CLÉ : statut selon le rôle ──
+    // user         → toujours 'brouillon', l'admin publiera après validation
+    // admin/orga   → respecte le choix du formulaire
+    const canPublish = ['admin', 'organisateur'].includes(req.utilisateur.role);
+    const statutFinal = canPublish
+      ? (stat_event || 'brouillon')
+      : 'brouillon';
+
+    const data = {
+      title_event: title_event.trim(),
+      event_description: event_description?.trim() || '',
+      ev_start_time: new Date(ev_start_time),
+      ev_end_time: ev_end_time ? new Date(ev_end_time) : undefined,
+      max_participants: Number(max_participants) || 30,
+      stat_event: statutFinal,
+      createur: req.utilisateur._id,
+      qr_code_token: null,
+    };
+
+    if (location && location !== '') data.location = location;
+    if (categories?.length) data.categories = Array.isArray(categories) ? categories : [categories];
+    if (statutFinal === 'publié') data.qr_code_token = crypto.randomBytes(32).toString('hex');
+
+    const ev = await Evenement.create(data);
+    const evPopule = await Evenement.findById(ev._id)
+      .populate('location', 'name_location')
+      .populate('categories', 'event_type event_categ')
+      .populate('createur', 'first_name last_name');
+
+    console.log(`✅ Événement créé [${req.utilisateur.role}] : ${ev.title_event}`);
+
+    const message = canPublish
+      ? `Événement "${ev.title_event}" créé`
+      : `Événement "${ev.title_event}" soumis — en attente de validation par l'administrateur`;
+
+    return res.status(201).json({ success: true, message, evenement: evPopule });
+  } catch (error) {
+    console.error('creerEvenement:', error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ success: false, message: Object.values(error.errors).map(e => e.message).join(', ') });
+    }
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// PUT /api/evenements/:id — Modifier
+// Créateur OU admin peuvent modifier
+// Un user ne peut PAS passer le statut à 'publié'
+// ─────────────────────────────────────────────────────────────
+const modifierEvenement = async (req, res) => {
+  try {
+    const ev = await Evenement.findById(req.params.id);
+    if (!ev) return res.status(404).json({ success: false, message: 'Événement introuvable' });
+
+    const estCreateur = ev.createur.toString() === req.utilisateur._id.toString();
+    const estAdmin = req.utilisateur.role === 'admin';
+    if (!estCreateur && !estAdmin) {
+      return res.status(403).json({ success: false, message: 'Non autorisé' });
+    }
+
+    const updates = { ...req.body };
+    if (updates.ev_start_time) updates.ev_start_time = new Date(updates.ev_start_time);
+    if (updates.ev_end_time) updates.ev_end_time = new Date(updates.ev_end_time);
+
+    // Seuls admin et organisateur peuvent publier
+    const canPublish = ['admin', 'organisateur'].includes(req.utilisateur.role);
+    if (!canPublish && updates.stat_event === 'publié') delete updates.stat_event;
+
+    // Générer QR si publication
+    if (updates.stat_event === 'publié' && !ev.qr_code_token) {
+      updates.qr_code_token = crypto.randomBytes(32).toString('hex');
+    }
+
+    const evMaj = await Evenement.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true })
+      .populate('location', 'name_location')
+      .populate('categories', 'event_type')
+      .populate('createur', 'first_name last_name');
+
+    return res.json({ success: true, message: 'Événement modifié', evenement: evMaj });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// DELETE /api/evenements/:id — Supprimer
+// Créateur peut supprimer ses brouillons
+// Admin peut tout supprimer
+// ─────────────────────────────────────────────────────────────
+const supprimerEvenement = async (req, res) => {
+  try {
+    const ev = await Evenement.findById(req.params.id);
+    if (!ev) return res.status(404).json({ success: false, message: 'Événement introuvable' });
+
+    const estCreateur = ev.createur.toString() === req.utilisateur._id.toString();
+    const estAdmin = req.utilisateur.role === 'admin';
+    if (!estCreateur && !estAdmin) {
+      return res.status(403).json({ success: false, message: 'Non autorisé' });
+    }
+    if (!estAdmin && ev.stat_event === 'publié') {
+      return res.status(403).json({ success: false, message: 'Impossible de supprimer un événement publié' });
+    }
+
+    await Evenement.findByIdAndDelete(req.params.id);
+    await Participation.deleteMany({ evenement: req.params.id });
+    return res.json({ success: true, message: 'Événement supprimé' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/evenements/:id/qr-scan
+// ─────────────────────────────────────────────────────────────
 const qrScan = async (req, res) => {
-    try {
-        const { qr_code_token, utilisateur_id } = req.body;
+  try {
+    const { qr_code_token } = req.body;
+    if (!qr_code_token) return res.status(400).json({ success: false, message: 'Token QR manquant' });
 
-        // Vérifier l'événement par token QR
-        const evenement = await Evenement.findOne({ qr_code_token });
-        if (!evenement) {
-            return res.status(404).json({ success: false, message: 'QR Code invalide' });
-        }
+    const ev = await Evenement.findOne({ qr_code_token });
+    if (!ev) return res.status(404).json({ success: false, message: 'QR Code invalide' });
 
-        // Mettre à jour la participation
-        const participation = await Participation.findOneAndUpdate(
-            { utilisateur: utilisateur_id, evenement: evenement._id },
-            { is_present: true, scanner_date: new Date() },
-            { new: true }
-        );
+    const p = await Participation.findOneAndUpdate(
+      { utilisateur: req.utilisateur._id, evenement: ev._id },
+      { is_present: true, scanner_date: new Date() },
+      { new: true }
+    );
+    if (!p) return res.status(404).json({ success: false, message: 'Vous n\'êtes pas inscrit à cet événement' });
 
-        if (!participation) {
-            return res.status(404).json({
-                success: false,
-                message: 'Cet utilisateur n\'est pas inscrit à cet événement'
-            });
-        }
-
-        // TODO: Calculer et ajouter les points à l'utilisateur
-        // TODO: Vérifier les règles de récompense et générer des coupons si seuil atteint
-
-        res.json({ success: true, message: 'Présence confirmée ✅', participation });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Erreur serveur' });
-    }
+    return res.json({ success: true, message: '✅ Présence confirmée !', participation: p, evenement: { title_event: ev.title_event } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
 };
 
-module.exports = { getEvenements, creerEvenement, getEvenement, qrScan };
+module.exports = {
+  getEvenements, getTousEvenements, getMesEvenements,
+  getEvenement, creerEvenement, modifierEvenement,
+  supprimerEvenement, qrScan,
+};

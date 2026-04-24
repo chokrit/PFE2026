@@ -145,7 +145,7 @@ const Register = () => {
 
                 setSuccess(true);
                 // Redirection vers le dashboard après 1.5 secondes
-                setTimeout(() => navigate('/dashboard'), 1500);
+                setTimeout(() => navigate('/dashboards'), 1500);
             }
 
         } catch (err) {

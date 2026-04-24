@@ -1,122 +1,88 @@
 // ============================================================
-// ProtectedRoute.jsx — Composant de protection des routes
-// Redirige vers /login si non connecté
-// Redirige vers /dashboard si rôle insuffisant
+// ProtectedRoute.jsx
+// Emplacement : frontend/src/components/ProtectedRoute.jsx
 //
-// Usage dans App.jsx :
+// PROBLÈME CORRIGÉ :
+//   L'ancienne version redirigait l'admin vers /login quand il
+//   cliquait "Espace utilisateur" car elle vérifiait aussi le rôle
+//   sur toutes les routes → les admins ne pouvaient pas accéder à /dashboard
+//
+// FONCTIONNEMENT CORRIGÉ :
+//   - Pas de token → redirige vers /login (pour tout le monde)
+//   - adminOnly=true + rôle != admin → redirige vers /dashboard
+//   - adminOnly=false (défaut) → laisse passer user ET admin
+//     → L'admin peut voir son "Espace utilisateur" (/dashboard)
+//
+// UTILISATION dans App.jsx :
+//   // Route pour tout utilisateur connecté (user ou admin)
+//   <Route path="/dashboard" element={
+//     <ProtectedRoute>
+//       <DashboardUser />
+//     </ProtectedRoute>
+//   } />
+//
+//   // Route admin seulement
 //   <Route path="/admin" element={
-//     <ProtectedRoute requiredRole="admin">
+//     <ProtectedRoute adminOnly>
 //       <DashboardAdmin />
 //     </ProtectedRoute>
 //   } />
+//
+// POUR MODIFIER :
+//   Pour ajouter un rôle "moderateur" : ajouter la logique ici
+//   Ex: if (modOnly && role !== 'moderateur') navigate('/dashboard')
 // ============================================================
 
-import React from 'react';
-import { Navigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-/**
- * ProtectedRoute
- * @param {React.ReactNode} children     — le composant à protéger
- * @param {string}          requiredRole — 'user' | 'admin' (défaut: 'user')
- */
-const ProtectedRoute = ({ children, requiredRole = 'user' }) => {
-  // Récupérer le token et l'utilisateur depuis localStorage
-  const token = localStorage.getItem('event_token');
-  const user  = localStorage.getItem('event_user');
+const ProtectedRoute = ({ children, adminOnly = false, organisateurOnly = false }) => {
+  const navigate = useNavigate();
+  const [ok, setOk] = useState(false); // true = autoriser l'affichage
 
-  // Pas de token → rediriger vers login
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
+  useEffect(() => {
+    const token = localStorage.getItem('event_token');
+    const userStr = localStorage.getItem('event_user');
 
-  // Vérifier le rôle si requis
-  if (requiredRole === 'admin' && user) {
-    const utilisateur = JSON.parse(user);
-    if (utilisateur.role !== 'admin') {
-      // Utilisateur connecté mais pas admin → son dashboard
-      return <Navigate to="/dashboard" replace />;
+    if (!token) {
+      navigate('/login', { replace: true });
+      return;
     }
-  }
 
-  // Tout OK → afficher le composant
+    let user = null;
+    try {
+      user = JSON.parse(userStr);
+    } catch {
+      localStorage.removeItem('event_token');
+      localStorage.removeItem('event_user');
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    if (!user) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    if (adminOnly && user.role !== 'admin') {
+      navigate('/dashboards', { replace: true });
+      return;
+    }
+
+    if (organisateurOnly && !['admin', 'organisateur'].includes(user.role)) {
+      navigate('/dashboards', { replace: true });
+      return;
+    }
+
+    setOk(true);
+
+  }, [navigate, adminOnly, organisateurOnly]);
+
+  // Afficher rien pendant la vérification (évite un flash de contenu)
+  if (!ok) return null;
+
+  // Afficher le composant enfant (la page protégée)
   return children;
 };
 
 export default ProtectedRoute;
-
-
-// ============================================================
-// MISE À JOUR DE App.jsx
-// Copier et remplacer le contenu de App.jsx existant
-// ============================================================
-
-/*
-// App.jsx complet avec toutes les routes et protections :
-
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { LanguageProvider } from './context/LanguageContext';
-import ProtectedRoute from './components/ProtectedRoute';
-
-// Pages publiques
-import SplashScreen    from './pages/SplashScreen';
-import LanguageSelect  from './pages/LanguageSelect';
-import Login           from './pages/Login';
-import Register        from './pages/Register';
-import ForgotPassword  from './pages/ForgotPassword';
-import AboutOrg        from './pages/AboutOrg';
-import AboutApp        from './pages/AboutApp';
-import Location        from './pages/Location';
-
-// Dashboards (protégés)
-import DashboardUser         from './pages/dashboards/DashboardUser';
-import DashboardAdmin        from './pages/dashboards/DashboardAdmin';
-import DashboardOrganisateur from './pages/dashboards/DashboardOrganisateur';
-
-function App() {
-  return (
-    <LanguageProvider>
-      <Router>
-        <Routes>
-
-          // ── Routes publiques ──
-          <Route path="/"               element={<SplashScreen />} />
-          <Route path="/select-language"element={<LanguageSelect />} />
-          <Route path="/login"          element={<Login />} />
-          <Route path="/register"       element={<Register />} />
-          <Route path="/forgot-password"element={<ForgotPassword />} />
-          <Route path="/about-org"      element={<AboutOrg />} />
-          <Route path="/about-app"      element={<AboutApp />} />
-          <Route path="/location"       element={<Location />} />
-
-          // ── Routes protégées (login requis) ──
-          <Route path="/dashboard" element={
-            <ProtectedRoute>
-              <DashboardUser />
-            </ProtectedRoute>
-          } />
-
-          // ── Routes admin seulement ──
-          <Route path="/admin" element={
-            <ProtectedRoute requiredRole="admin">
-              <DashboardAdmin />
-            </ProtectedRoute>
-          } />
-
-          <Route path="/organisateur" element={
-            <ProtectedRoute requiredRole="admin">
-              <DashboardOrganisateur />
-            </ProtectedRoute>
-          } />
-
-          // ── Toute autre route → splash ──
-          <Route path="*" element={<Navigate to="/" replace />} />
-
-        </Routes>
-      </Router>
-    </LanguageProvider>
-  );
-}
-
-export default App;
-*/

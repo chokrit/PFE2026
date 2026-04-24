@@ -3,30 +3,238 @@
 // Préfixe : /api/utilisateurs
 // ============================================================
 
+//const express = require('express');
+//const router = express.Router();
+//const { verifyToken, isAdmin } = require('../middleware/auth');
+//const {
+// getTousUtilisateurs,
+// getUtilisateur,
+//modifierUtilisateur,
+//supprimerUtilisateur,
+//changerRole
+//} = require('../controllers/utilisateurController');
+
+// GET /api/utilisateurs — Liste complète (admin seulement)
+//router.get('/', verifyToken, isAdmin, getTousUtilisateurs);
+
+// GET /api/utilisateurs/:id — Profil d'un utilisateur (connecté)
+//router.get('/:id', verifyToken, getUtilisateur);
+
+// PUT /api/utilisateurs/:id — Modifier son profil (soi-même ou admin)
+//router.put('/:id', verifyToken, modifierUtilisateur);
+
+// DELETE /api/utilisateurs/:id — Supprimer (admin seulement)
+//router.delete('/:id', verifyToken, isAdmin, supprimerUtilisateur);
+
+// PUT /api/utilisateurs/:id/role — Changer le rôle (admin seulement)
+//router.put('/:id/role', verifyToken, isAdmin, changerRole);
+
+//module.exports = router;
+//============================================================
+// ============================================================
+// models/Utilisateur.js
+// CORRECTION : 3ème argument de mongoose.model() = nom exact
+//              de la collection dans Atlas → 'utilisateur' (sans s)
+// ============================================================
+
+// ============================================================
+// routes/utilisateurs.js
+// Emplacement : backend/routes/utilisateurs.js
+//
+// PROBLÈMES CORRIGÉS :
+//   1. La collection s'appelle "utilisateur" (sans s) dans Atlas
+//      → Mongoose doit recevoir le 3ème argument dans le modèle
+//   2. GET /api/utilisateurs retournait [] car il cherchait dans
+//      "utilisateurs" (avec s) au lieu de "utilisateur"
+//   3. Ajout de logs console pour déboguer facilement
+//
+// POUR MODIFIER PLUS TARD :
+//   - Ajouter pagination : ?page=1&limit=20 dans la route GET /
+//   - Ajouter tri : ?sort=created_at&order=desc
+//   - Ajouter filtre par rôle : ?role=admin
+// ============================================================
+
 const express = require('express');
 const router = express.Router();
 const { verifyToken, isAdmin } = require('../middleware/auth');
-const {
-    getTousUtilisateurs,
-    getUtilisateur,
-    modifierUtilisateur,
-    supprimerUtilisateur,
-    changerRole
-} = require('../controllers/utilisateurController');
+const Utilisateur = require('../models/Utilisateur');
 
-// GET /api/utilisateurs — Liste complète (admin seulement)
-router.get('/', verifyToken, isAdmin, getTousUtilisateurs);
+// ─────────────────────────────────────────────────────────────
+// GET /api/utilisateurs
+// Liste tous les utilisateurs — admin seulement
+//
+// POURQUOI ÇA NE MARCHAIT PAS :
+//   Mongoose crée une collection avec le nom du modèle mis en
+//   minuscule + "s" par défaut → "utilisateurs".
+//   Mais dans Atlas la collection s'appelle "utilisateur" (sans s).
+//   FIX : le 3ème argument de mongoose.model() dans Utilisateur.js
+//   force le bon nom → mongoose.model('Utilisateur', schema, 'utilisateur')
+// ─────────────────────────────────────────────────────────────
+router.get('/', verifyToken, isAdmin, async (req, res) => {
+    try {
+        // Récupère tous les utilisateurs SANS le mot de passe
+        // .select('-password_hash') exclut ce champ sensible
+        const utilisateurs = await Utilisateur
+            .find()
+            .select('-password_hash -__v')
+            .sort({ created_at: -1 });
 
-// GET /api/utilisateurs/:id — Profil d'un utilisateur (connecté)
-router.get('/:id', verifyToken, getUtilisateur);
+        // Log pour vérifier dans la console du backend
+        console.log(`📋 GET /api/utilisateurs → ${utilisateurs.length} utilisateurs trouvés`);
 
-// PUT /api/utilisateurs/:id — Modifier son profil (soi-même ou admin)
-router.put('/:id', verifyToken, modifierUtilisateur);
+        return res.json({
+            success: true,
+            count: utilisateurs.length,
+            utilisateurs: utilisateurs,
+        });
+    } catch (error) {
+        console.error('❌ Erreur GET /api/utilisateurs:', error.message);
+        return res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors de la récupération des utilisateurs',
+            // En développement : afficher le détail de l'erreur
+            detail: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        });
+    }
+});
 
-// DELETE /api/utilisateurs/:id — Supprimer (admin seulement)
-router.delete('/:id', verifyToken, isAdmin, supprimerUtilisateur);
+// ─────────────────────────────────────────────────────────────
+// GET /api/utilisateurs/:id
+// Détail d'un utilisateur — admin seulement
+// ─────────────────────────────────────────────────────────────
+router.get('/:id', verifyToken, isAdmin, async (req, res) => {
+    try {
+        const utilisateur = await Utilisateur
+            .findById(req.params.id)
+            .select('-password_hash -__v');
 
-// PUT /api/utilisateurs/:id/role — Changer le rôle (admin seulement)
-router.put('/:id/role', verifyToken, isAdmin, changerRole);
+        if (!utilisateur) {
+            return res.status(404).json({
+                success: false,
+                message: 'Utilisateur introuvable',
+            });
+        }
+
+        return res.json({ success: true, utilisateur });
+    } catch (error) {
+        console.error('❌ Erreur GET /api/utilisateurs/:id:', error.message);
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// PUT /api/utilisateurs/:id/role
+// Changer le rôle d'un utilisateur — admin seulement
+//
+// POUR MODIFIER :
+//   Ajouter d'autres rôles dans l'enum si besoin
+//   Ex: ['user', 'admin', 'organisateur', 'moderateur']
+// ─────────────────────────────────────────────────────────────
+router.put('/:id/role', verifyToken, isAdmin, async (req, res) => {
+    try {
+        const { role } = req.body;
+
+        // Vérifier que le rôle est valide
+        const rolesValides = ['user', 'admin', 'organisateur'];
+        if (!rolesValides.includes(role)) {
+            return res.status(400).json({
+                success: false,
+                message: `Rôle invalide. Valeurs acceptées : ${rolesValides.join(', ')}`,
+            });
+        }
+
+        // Empêcher l'admin de se retirer son propre rôle
+        if (req.params.id === req.utilisateur._id.toString() && role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Vous ne pouvez pas modifier votre propre rôle',
+            });
+        }
+
+        const utilisateur = await Utilisateur.findByIdAndUpdate(
+            req.params.id,
+            { role },
+            { new: true }
+        ).select('-password_hash -__v');
+
+        if (!utilisateur) {
+            return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+        }
+
+        console.log(`✅ Rôle changé → ${utilisateur.email} : ${role}`);
+        return res.json({ success: true, message: `Rôle changé en "${role}"`, utilisateur });
+    } catch (error) {
+        console.error('❌ Erreur PUT /role:', error.message);
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// DELETE /api/utilisateurs/:id
+// Supprimer un utilisateur — admin seulement
+//
+// ATTENTION : Ne supprime pas les participations liées !
+// POUR MODIFIER : ajouter Participation.deleteMany({ utilisateur: id })
+//                avant la suppression pour nettoyer la base
+// ─────────────────────────────────────────────────────────────
+router.delete('/:id', verifyToken, isAdmin, async (req, res) => {
+    try {
+        // Empêcher l'admin de se supprimer lui-même
+        if (req.params.id === req.utilisateur._id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: 'Vous ne pouvez pas supprimer votre propre compte',
+            });
+        }
+
+        const utilisateur = await Utilisateur.findByIdAndDelete(req.params.id);
+
+        if (!utilisateur) {
+            return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+        }
+
+        // TODO : Supprimer aussi les participations de cet utilisateur
+        // const Participation = require('../models/Participation');
+        // await Participation.deleteMany({ utilisateur: req.params.id });
+
+        console.log(`✅ Utilisateur supprimé : ${utilisateur.email}`);
+        return res.json({
+            success: true,
+            message: `Utilisateur "${utilisateur.first_name} ${utilisateur.last_name}" supprimé`,
+        });
+    } catch (error) {
+        console.error('❌ Erreur DELETE /api/utilisateurs:', error.message);
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// PUT /api/utilisateurs/profil
+// Modifier son propre profil — tout utilisateur connecté
+// ─────────────────────────────────────────────────────────────
+router.put('/profil', verifyToken, async (req, res) => {
+    try {
+        const allowed = ['first_name', 'last_name', 'telephone', 'sexe', 'langue'];
+        const updates = {};
+        allowed.forEach(field => {
+            if (req.body[field] !== undefined) updates[field] = req.body[field];
+        });
+
+        const utilisateur = await Utilisateur.findByIdAndUpdate(
+            req.utilisateur._id,
+            updates,
+            { new: true, runValidators: true }
+        ).select('-password_hash -__v');
+
+        if (!utilisateur) {
+            return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+        }
+
+        return res.json({ success: true, message: 'Profil mis à jour', utilisateur });
+    } catch (error) {
+        console.error('❌ Erreur PUT /profil:', error.message);
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
 
 module.exports = router;

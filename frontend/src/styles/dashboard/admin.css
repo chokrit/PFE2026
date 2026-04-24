@@ -169,6 +169,12 @@
   border-color: rgba(0, 212, 255, 0.2);
 }
 
+.admin-role-select.role-orga {
+  background: rgba(255, 107, 0, 0.15);
+  color: #ff6b00;
+  border-color: rgba(255, 107, 0, 0.3);
+}
+
 /* ── Barre de fiabilité ── */
 .admin-reliability {
   display: flex;

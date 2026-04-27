@@ -15,6 +15,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useLanguage } from '../../context/LanguageContext';
 import api from '../../api';
 import StatCard from '../../components/dashboard/StatCard';
+import MonEspaceModal from '../../components/dashboard/MonEspaceModal';
 import '../../styles/dashboard/dashboard.css';
 import '../../styles/dashboard/admin.css';
 
@@ -43,6 +44,7 @@ const DashboardAdmin = () => {
   const [userSearch, setUserSearch] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [filtreStatut, setFiltreStatut] = useState('tous');
+  const [showMonEspace, setShowMonEspace] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('event_token');
@@ -171,6 +173,14 @@ const DashboardAdmin = () => {
   return (
     <div className={`dashboard-page admin-page ${isRTL ? 'rtl' : ''}`}>
 
+      {showMonEspace && (
+        <MonEspaceModal
+          utilisateur={adminUser}
+          onClose={() => setShowMonEspace(false)}
+          onUpdate={(u) => setAdminUser(u)}
+        />
+      )}
+
       {notif && (
         <div className={`dash-notif dash-notif--${notif.type}`}>
           {notif.type === 'success' ? '✓' : '⚠'} {notif.msg}
@@ -199,8 +209,24 @@ const DashboardAdmin = () => {
           <span className="admin-badge">ADMIN</span>
         </div>
         <div className="dash-header__right">
-          <span className="dash-username">{adminUser?.first_name} {adminUser?.last_name}</span>
-          <Link to="/organisateur" className="dash-btn-ghost">Mon espace</Link>
+          <div className="dash-user-chip">
+            <div className="dash-avatar" style={{ overflow: 'hidden', padding: adminUser?.photo ? 0 : undefined }}>
+              {adminUser?.photo
+                ? <img src={adminUser.photo} alt="avatar"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                : <>{adminUser?.first_name?.[0]}{adminUser?.last_name?.[0]}</>
+              }
+            </div>
+            <span className="dash-username">{adminUser?.first_name} {adminUser?.last_name}</span>
+          </div>
+          <button
+            className="dash-btn-ghost"
+            onClick={() => setShowMonEspace(true)}
+            title="Modifier vos informations personnelles et votre mot de passe"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            👤 Mon compte
+          </button>
           <button className="dash-btn-logout" onClick={() => { localStorage.clear(); navigate('/login'); }}>Déconnexion</button>
         </div>
       </header>

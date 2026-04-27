@@ -16,7 +16,7 @@
 
 import React from 'react';
 
-const EventCard = ({ event, mode, onVoirQR, onSInscrire }) => {
+const EventCard = ({ event, mode, onVoirQR, onSInscrire, onAnnuler }) => {
   // ── Formatage de la date ──
   const formatDate = (dateStr) => {
     const d = new Date(dateStr);
@@ -116,7 +116,18 @@ const EventCard = ({ event, mode, onVoirQR, onSInscrire }) => {
             >
               📱 Mon QR code
             </button>
-            {/* TODO: bouton "Annuler mon inscription" */}
+            {!event.is_present && event.stat_event !== 'terminé' && event.stat_event !== 'annulé' && (
+              <button
+                onClick={onAnnuler}
+                style={{
+                  padding: '6px 12px', background: 'transparent', color: '#ff4d6d',
+                  border: '1px solid rgba(255,77,109,.3)', borderRadius: '6px',
+                  fontSize: '12px', cursor: 'pointer', fontFamily: 'Poppins,sans-serif',
+                }}
+              >
+                Annuler
+              </button>
+            )}
           </>
         )}
 

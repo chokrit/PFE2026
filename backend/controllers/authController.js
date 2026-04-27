@@ -23,7 +23,7 @@ const genererToken = (id) => {
 // ─────────────────────────────────────────────────────────────
 const register = async (req, res) => {
   try {
-    const { first_name, last_name, email, password, telephone, sexe, langue } = req.body;
+    const { first_name, last_name, email, password, telephone, sexe, langue, date_naissance, photo } = req.body;
 
     // Validation champs obligatoires
     if (!first_name || !last_name || !email || !password) {
@@ -44,14 +44,16 @@ const register = async (req, res) => {
 
     // ⚠️ role toujours 'user' — jamais depuis req.body
     const nouvelUtilisateur = await Utilisateur.create({
-      first_name: first_name.trim(),
-      last_name: last_name.trim(),
-      email: email.toLowerCase().trim(),
-      password_hash: password,   // hashé par le pre-save hook
-      telephone: telephone || undefined,
-      sexe: sexe || undefined,
-      langue: langue || 'fr',
-      role: 'user',
+      first_name:      first_name.trim(),
+      last_name:       last_name.trim(),
+      email:           email.toLowerCase().trim(),
+      password_hash:   password,   // hashé par le pre-save hook
+      telephone:       telephone || undefined,
+      sexe:            sexe || undefined,
+      langue:          langue || 'fr',
+      date_naissance:  date_naissance || undefined,
+      photo:           photo || undefined,
+      role:            'user',
     });
 
     const token = genererToken(nouvelUtilisateur._id);
@@ -117,16 +119,18 @@ const login = async (req, res) => {
       message: 'Connexion réussie',
       token,
       utilisateur: {
-        _id: utilisateur._id,
-        first_name: utilisateur.first_name,
-        last_name: utilisateur.last_name,
-        email: utilisateur.email,
-        role: utilisateur.role,        // ← INDISPENSABLE
-        langue: utilisateur.langue,
-        cumul_points: utilisateur.cumul_points,
-        cumul_heures_participation: utilisateur.cumul_heures_participation,
-        cumul_points_remise: utilisateur.cumul_points_remise,
-        reliabilite_score: utilisateur.reliabilite_score,
+        _id:                          utilisateur._id,
+        first_name:                   utilisateur.first_name,
+        last_name:                    utilisateur.last_name,
+        email:                        utilisateur.email,
+        role:                         utilisateur.role,
+        langue:                       utilisateur.langue,
+        telephone:                    utilisateur.telephone,
+        photo:                        utilisateur.photo,
+        cumul_points:                 utilisateur.cumul_points,
+        cumul_heures_participation:   utilisateur.cumul_heures_participation,
+        cumul_points_remise:          utilisateur.cumul_points_remise,
+        reliabilite_score:            utilisateur.reliabilite_score,
       },
     });
 

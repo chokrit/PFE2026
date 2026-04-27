@@ -2,15 +2,9 @@
 // Register.jsx
 // Chemin : frontend/src/pages/Register.jsx
 // Route  : /register
-//
-// Page d'inscription à l'application EVENT.
-// Accessible sans connexion, depuis le lien Login.
-//
-// État actuel : formulaire complet avec validation côté client.
-// Backend      : appel POST /api/auth/register prêt à activer.
 // ============================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import { useLanguage } from '../context/LanguageContext';
@@ -23,72 +17,94 @@ const Register = () => {
 
     // ── États du formulaire ──────────────────────────────────────
     const [form, setForm] = useState({
-        first_name: '',
-        last_name: '',
-        email: '',
-        password: '',
-        confirmPassword: '',
-        telephone: '',
-        // TODO: activer date_naissance quand le modèle Mongoose l'inclut
-        // date_naissance: '',
-        sexe: '',
-        // TODO: role est toujours 'user' côté backend (sécurité)
-        //       Ce champ est uniquement visuel pour l'UX
-        roleAffiche: 'sportif',
+        first_name:     '',
+        last_name:      '',
+        email:          '',
+        password:       '',
+        confirmPassword:'',
+        telephone:      '',
+        date_naissance: '',
+        sexe:           '',
+        roleAffiche:    'sportif',
     });
 
-    const [photo, setPhoto] = useState(null);   // fichier image sélectionné
-    const [photoPreview, setPhotoPreview] = useState(null); // URL pour prévisualisation
-    const [showPw, setShowPw] = useState(false);  // toggle mot de passe
-    const [showPw2, setShowPw2] = useState(false);  // toggle confirmation
+    const [photoPreview, setPhotoPreview] = useState(null);
+    const [photoB64, setPhotoB64] = useState('');
+    const fileInputRef = useRef(null);
+
+    const [selectedCats, setSelectedCats] = useState(new Set());
+    const [categories, setCategories] = useState([]);
+
+    const [showPw, setShowPw]   = useState(false);
+    const [showPw2, setShowPw2] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
+    const [error, setError]     = useState('');
     const [success, setSuccess] = useState(false);
+
+    // ── Charger les catégories au montage ───────────────────────
+    useEffect(() => {
+        axios.get('/api/categories')
+            .then(r => setCategories(r.data.categories || []))
+            .catch(() => {});
+    }, []);
 
     // ── Mise à jour d'un champ ───────────────────────────────────
     const handleChange = (e) => {
         const { name, value } = e.target;
         setForm(prev => ({ ...prev, [name]: value }));
-        setError(''); // effacer erreur au fur et à mesure
+        setError('');
     };
 
-    // ── Gestion de la photo de profil ───────────────────────────
+    // ── Photo → base64 ──────────────────────────────────────────
     const handlePhoto = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
-        // Vérifier le type (image uniquement)
         if (!file.type.startsWith('image/')) {
-            setError('Veuillez sélectionner une image.');
+            setError(t('errorPhotoType'));
             return;
         }
-
-        // Vérifier la taille (max 5 Mo)
-        if (file.size > 5 * 1024 * 1024) {
-            setError('La photo ne doit pas dépasser 5 Mo.');
+        if (file.size > 2 * 1024 * 1024) {
+            setError('La photo ne doit pas dépasser 2 Mo.');
             return;
         }
-
-        setPhoto(file);
-        // Créer une URL temporaire pour la prévisualisation
-        setPhotoPreview(URL.createObjectURL(file));
-
-        // TODO: Upload vers Cloudinary ou AWS S3 lors de la soumission
-        // Voir backend/controllers/authController.js → route register
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            setPhotoPreview(ev.target.result);
+            setPhotoB64(ev.target.result);
+        };
+        reader.readAsDataURL(file);
     };
 
-    // ── Validation côté client ───────────────────────────────────
+    const removePhoto = () => {
+        setPhotoPreview(null);
+        setPhotoB64('');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    // ── Toggle intérêt ───────────────────────────────────────────
+    const toggleCat = (id) => {
+        setSelectedCats(prev => {
+            const next = new Set(prev);
+            next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+        });
+    };
+
+    // Regrouper par event_categ
+    const grouped = categories.reduce((acc, cat) => {
+        const key = cat.event_categ || 'Autre';
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(cat);
+        return acc;
+    }, {});
+
+    // ── Validation ───────────────────────────────────────────────
     const valider = () => {
         if (!form.first_name.trim() || !form.last_name.trim()) {
             setError('Le prénom et le nom sont obligatoires.');
             return false;
         }
-        if (!form.email.trim()) {
-            setError(t('errorRequired'));
-            return false;
-        }
-        // Regex email simple
-        if (!/^\S+@\S+\.\S+$/.test(form.email)) {
+        if (!form.email.trim() || !/^\S+@\S+\.\S+$/.test(form.email)) {
             setError(t('errorEmail'));
             return false;
         }
@@ -103,60 +119,71 @@ const Register = () => {
         return true;
     };
 
-    // ── Soumission du formulaire ─────────────────────────────────
+    // ── Soumission ───────────────────────────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
-
         if (!valider()) return;
 
         setLoading(true);
         try {
-            // ── Appel API vers le backend Express ──
-            // Le champ 'role' est TOUJOURS 'user' côté backend (sécurité)
-            // Ne jamais envoyer roleAffiche au backend
+            // Inscription sans photo (pas encore de token)
             const response = await axios.post('/api/auth/register', {
-                first_name: form.first_name.trim(),
-                last_name: form.last_name.trim(),
-                email: form.email.toLowerCase().trim(),
-                password: form.password,
-                telephone: form.telephone.trim() || undefined,
-                sexe: form.sexe || undefined,
-                // TODO: date_naissance: form.date_naissance || undefined,
-                langue: localStorage.getItem('event_langue') || 'fr',
-                // ⚠️ role : jamais envoyé depuis le frontend
-                //    Le backend force toujours role = 'user'
+                first_name:     form.first_name.trim(),
+                last_name:      form.last_name.trim(),
+                email:          form.email.toLowerCase().trim(),
+                password:       form.password,
+                telephone:      form.telephone.trim() || undefined,
+                sexe:           form.sexe || undefined,
+                date_naissance: form.date_naissance || undefined,
+                langue:         localStorage.getItem('event_langue') || 'fr',
             });
 
             if (response.data.success) {
-                // Stocker le JWT et les infos utilisateur
-                localStorage.setItem('event_token', response.data.token);
-                localStorage.setItem('event_user', JSON.stringify(response.data.utilisateur));
+                const token = response.data.token;
+                let utilisateurStocke = response.data.utilisateur;
+                localStorage.setItem('event_token', token);
 
-                // TODO: si photo sélectionnée → uploader vers /api/medias
-                // const formData = new FormData();
-                // formData.append('photo', photo);
-                // await axios.post('/api/medias/photo-profil', formData, {
-                //   headers: {
-                //     'Content-Type': 'multipart/form-data',
-                //     'Authorization': `Bearer ${response.data.token}`
-                //   }
-                // });
+                const authHeader = { headers: { Authorization: `Bearer ${token}` } };
+
+                // Upload photo vers Cloudinary maintenant qu'on a le token
+                if (photoB64) {
+                    try {
+                        const photoRes = await axios.post('/api/utilisateurs/upload-photo',
+                            { image: photoB64 }, authHeader);
+                        const photoUrl = photoRes.data.url;
+                        await axios.put('/api/utilisateurs/profil', { photo: photoUrl }, authHeader);
+                        utilisateurStocke = { ...utilisateurStocke, photo: photoUrl };
+                    } catch {
+                        // Non bloquant
+                    }
+                }
+
+                localStorage.setItem('event_user', JSON.stringify(utilisateurStocke));
+
+                // Sauvegarder les intérêts si l'utilisateur en a sélectionné
+                if (selectedCats.size > 0) {
+                    try {
+                        await axios.put('/api/utilisateurs/mes-interests',
+                            { categories: Array.from(selectedCats) },
+                            authHeader
+                        );
+                    } catch {
+                        // Non bloquant — le compte est créé
+                    }
+                }
 
                 setSuccess(true);
-                // Redirection vers le dashboard après 1.5 secondes
                 setTimeout(() => navigate('/dashboards'), 1500);
             }
-
         } catch (err) {
-            // Afficher le message d'erreur retourné par le backend
             setError(err.response?.data?.message || t('error'));
         } finally {
             setLoading(false);
         }
     };
 
-    // ── Affichage du message de succès ───────────────────────────
+    // ── Écran de succès ─────────────────────────────────────────
     if (success) {
         return (
             <div className={`login-page ${isRTL ? 'rtl' : ''}`}>
@@ -177,24 +204,19 @@ const Register = () => {
     return (
         <div className={`login-page ${isRTL ? 'rtl' : ''}`}>
 
-            {/* Sélecteur de langue */}
             <div className="lang-switcher-top">
                 <LanguageSwitcher />
             </div>
 
             <div className="login-container" style={{ maxWidth: '480px' }}>
 
-                {/* Logo */}
                 <div className="login-logo">
                     <Logo size={60} color="#00d4ff" />
                 </div>
 
                 <h2 style={{
-                    textAlign: 'center',
-                    fontSize: '20px',
-                    fontWeight: 700,
-                    marginBottom: '1.5rem',
-                    color: '#e8e8f0'
+                    textAlign: 'center', fontSize: '20px', fontWeight: 700,
+                    marginBottom: '1.5rem', color: '#e8e8f0',
                 }}>
                     {t('createAccount')}
                 </h2>
@@ -203,96 +225,76 @@ const Register = () => {
 
                     {/* ── PHOTO DE PROFIL ── */}
                     <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-                        <label htmlFor="photo-input" style={{ cursor: 'pointer' }}>
-                            <div style={{
-                                width: '80px', height: '80px', borderRadius: '50%',
-                                border: '2px dashed #2a2a4a', margin: '0 auto 8px',
-                                overflow: 'hidden', display: 'flex', alignItems: 'center',
-                                justifyContent: 'center', background: '#12122a',
-                                transition: 'border-color .2s',
-                            }}>
-                                {photoPreview ? (
-                                    <img src={photoPreview} alt="preview"
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                ) : (
-                                    <span style={{ fontSize: '28px' }}>📷</span>
-                                )}
-                            </div>
-                            <span style={{ fontSize: '12px', color: '#8888aa' }}>
-                                {t('profilePhoto')}
-                                {/* TODO: Connecter à Cloudinary ou AWS S3 pour stockage réel */}
-                            </span>
-                        </label>
-                        <input
-                            id="photo-input"
-                            type="file"
-                            accept="image/*"
-                            onChange={handlePhoto}
-                            style={{ display: 'none' }}
-                        />
+                        <div style={{
+                            width: 80, height: 80, borderRadius: '50%',
+                            border: '2px dashed #2a2a4a', margin: '0 auto 8px',
+                            overflow: 'hidden', display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', background: '#12122a',
+                        }}>
+                            {photoPreview
+                                ? <img src={photoPreview} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                : <span style={{ fontSize: 28 }}>📷</span>}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <button type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                style={{
+                                    fontSize: 11, padding: '4px 10px', cursor: 'pointer', borderRadius: 6,
+                                    background: 'rgba(0,212,255,.08)', color: '#00d4ff',
+                                    border: '1px solid rgba(0,212,255,.3)', fontFamily: 'Poppins,sans-serif',
+                                }}>
+                                {t('profilePhoto')} <span style={{ opacity: .6 }}>({t('optional')})</span>
+                            </button>
+                            {photoPreview && (
+                                <button type="button" onClick={removePhoto}
+                                    style={{
+                                        fontSize: 11, padding: '4px 10px', cursor: 'pointer', borderRadius: 6,
+                                        background: 'transparent', color: '#ff4d6d',
+                                        border: '1px solid rgba(255,77,109,.3)', fontFamily: 'Poppins,sans-serif',
+                                    }}>
+                                    Supprimer
+                                </button>
+                            )}
+                        </div>
+                        <input ref={fileInputRef} id="photo-input" type="file" accept="image/*"
+                            onChange={handlePhoto} style={{ display: 'none' }} />
+                        <p style={{ fontSize: 10, color: '#555577', marginTop: 4 }}>JPG, PNG — max 2 Mo</p>
                     </div>
 
-                    {/* ── NOM ET PRÉNOM (côte à côte) ── */}
+                    {/* ── NOM ET PRÉNOM ── */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                         <div className="form-group">
                             <label className="form-label">{t('firstName')} *</label>
-                            <input
-                                className="form-input"
-                                type="text"
-                                name="first_name"
-                                value={form.first_name}
-                                onChange={handleChange}
-                                placeholder={t('firstName')}
-                                autoComplete="given-name"
-                                dir={isRTL ? 'rtl' : 'ltr'}
-                            />
+                            <input className="form-input" type="text" name="first_name"
+                                value={form.first_name} onChange={handleChange}
+                                placeholder={t('firstName')} autoComplete="given-name"
+                                dir={isRTL ? 'rtl' : 'ltr'} />
                         </div>
                         <div className="form-group">
                             <label className="form-label">{t('lastName')} *</label>
-                            <input
-                                className="form-input"
-                                type="text"
-                                name="last_name"
-                                value={form.last_name}
-                                onChange={handleChange}
-                                placeholder={t('lastName')}
-                                autoComplete="family-name"
-                                dir={isRTL ? 'rtl' : 'ltr'}
-                            />
+                            <input className="form-input" type="text" name="last_name"
+                                value={form.last_name} onChange={handleChange}
+                                placeholder={t('lastName')} autoComplete="family-name"
+                                dir={isRTL ? 'rtl' : 'ltr'} />
                         </div>
                     </div>
 
                     {/* ── EMAIL ── */}
                     <div className="form-group">
                         <label className="form-label">{t('email')} *</label>
-                        <input
-                            className="form-input"
-                            type="email"
-                            name="email"
-                            value={form.email}
-                            onChange={handleChange}
-                            placeholder="exemple@email.com"
-                            autoComplete="email"
-                            dir="ltr" // email toujours LTR
-                        />
+                        <input className="form-input" type="email" name="email"
+                            value={form.email} onChange={handleChange}
+                            placeholder="exemple@email.com" autoComplete="email" dir="ltr" />
                     </div>
 
                     {/* ── MOT DE PASSE ── */}
                     <div className="form-group">
                         <label className="form-label">{t('password')} *</label>
                         <div className="password-wrapper">
-                            <input
-                                className="form-input"
-                                type={showPw ? 'text' : 'password'}
-                                name="password"
-                                value={form.password}
-                                onChange={handleChange}
-                                placeholder="6 caractères minimum"
-                                autoComplete="new-password"
-                                dir="ltr"
-                            />
-                            <button type="button" className="toggle-password"
-                                onClick={() => setShowPw(!showPw)}>
+                            <input className="form-input" type={showPw ? 'text' : 'password'}
+                                name="password" value={form.password} onChange={handleChange}
+                                placeholder="6 caractères minimum" autoComplete="new-password" dir="ltr" />
+                            <button type="button" className="toggle-password" onClick={() => setShowPw(!showPw)}>
                                 {showPw ? '🙈' : '👁️'}
                             </button>
                         </div>
@@ -302,18 +304,10 @@ const Register = () => {
                     <div className="form-group">
                         <label className="form-label">{t('confirmPassword')} *</label>
                         <div className="password-wrapper">
-                            <input
-                                className="form-input"
-                                type={showPw2 ? 'text' : 'password'}
-                                name="confirmPassword"
-                                value={form.confirmPassword}
-                                onChange={handleChange}
-                                placeholder={t('confirmPassword')}
-                                autoComplete="new-password"
-                                dir="ltr"
-                            />
-                            <button type="button" className="toggle-password"
-                                onClick={() => setShowPw2(!showPw2)}>
+                            <input className="form-input" type={showPw2 ? 'text' : 'password'}
+                                name="confirmPassword" value={form.confirmPassword} onChange={handleChange}
+                                placeholder={t('confirmPassword')} autoComplete="new-password" dir="ltr" />
+                            <button type="button" className="toggle-password" onClick={() => setShowPw2(!showPw2)}>
                                 {showPw2 ? '🙈' : '👁️'}
                             </button>
                         </div>
@@ -323,107 +317,106 @@ const Register = () => {
                     <div className="form-group">
                         <label className="form-label">
                             {t('phone')}
-                            <span style={{ color: '#8888aa', marginLeft: '4px', fontSize: '11px' }}>(optionnel)</span>
+                            <span style={{ color: '#8888aa', marginLeft: 4, fontSize: 11 }}>({t('optional')})</span>
                         </label>
-                        <input
-                            className="form-input"
-                            type="tel"
-                            name="telephone"
-                            value={form.telephone}
-                            onChange={handleChange}
-                            placeholder="+216 XX XXX XXX"
-                            autoComplete="tel"
-                            dir="ltr"
-                        />
+                        <input className="form-input" type="tel" name="telephone"
+                            value={form.telephone} onChange={handleChange}
+                            placeholder="+216 XX XXX XXX" autoComplete="tel" dir="ltr" />
+                    </div>
+
+                    {/* ── DATE DE NAISSANCE ── */}
+                    <div className="form-group">
+                        <label className="form-label">
+                            {t('birthDate')}
+                            <span style={{ color: '#8888aa', marginLeft: 4, fontSize: 11 }}>({t('optional')})</span>
+                        </label>
+                        <input className="form-input" type="date" name="date_naissance"
+                            value={form.date_naissance} onChange={handleChange}
+                            max={new Date().toISOString().split('T')[0]}
+                            style={{ colorScheme: 'dark' }} />
                     </div>
 
                     {/* ── SEXE ── */}
                     <div className="form-group">
                         <label className="form-label">
-                            Sexe
-                            <span style={{ color: '#8888aa', marginLeft: '4px', fontSize: '11px' }}>(optionnel)</span>
+                            {t('sexe')}
+                            <span style={{ color: '#8888aa', marginLeft: 4, fontSize: 11 }}>({t('optional')})</span>
                         </label>
-                        <select
-                            className="form-input"
-                            name="sexe"
-                            value={form.sexe}
-                            onChange={handleChange}
-                            style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}
-                        >
+                        <select className="form-input" name="sexe" value={form.sexe} onChange={handleChange}
+                            style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
                             <option value="">— Sélectionner —</option>
-                            <option value="homme">Homme</option>
-                            <option value="femme">Femme</option>
-
+                            <option value="homme">{t('sexeHomme')}</option>
+                            <option value="femme">{t('sexeFemme')}</option>
                         </select>
                     </div>
 
-                    {/* ── RÔLE (visuel uniquement — backend force 'user') ── */}
+                    {/* ── RÔLE (visuel — backend force 'user') ── */}
                     <div className="form-group">
-                        <label className="form-label">
-                            {t('role')}
-                            {/* ⚠️ Ce champ est uniquement pour l'UX.
-                  Le backend attribue TOUJOURS le rôle 'user'.
-                  L'admin peut modifier le rôle depuis DashboardAdmin.
-              */}
-                        </label>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+                        <label className="form-label">{t('role')}</label>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                             {[
-                                { value: 'sportif', label: t('roleSportif'), icon: '🏃' },
+                                { value: 'sportif',      label: t('roleSportif'),      icon: '🏃' },
                                 { value: 'organisateur', label: t('roleOrganisateur'), icon: '🏟' },
-                                { value: 'spectateur', label: t('roleSpectateur'), icon: '👁' },
-                            ].map(option => (
-                                <label
-                                    key={option.value}
-                                    style={{
-                                        display: 'flex', flexDirection: 'column', alignItems: 'center',
-                                        gap: '4px', padding: '10px 8px',
-                                        background: form.roleAffiche === option.value ? 'rgba(0,212,255,0.1)' : '#1a1a35',
-                                        border: `1px solid ${form.roleAffiche === option.value ? '#00d4ff' : '#2a2a4a'}`,
-                                        borderRadius: '8px', cursor: 'pointer', fontSize: '12px',
-                                        color: form.roleAffiche === option.value ? '#00d4ff' : '#8888aa',
-                                        transition: 'all .2s',
-                                    }}
-                                >
-                                    <input
-                                        type="radio"
-                                        name="roleAffiche"
-                                        value={option.value}
-                                        checked={form.roleAffiche === option.value}
-                                        onChange={handleChange}
-                                        style={{ display: 'none' }}
-                                    />
-                                    <span style={{ fontSize: '20px' }}>{option.icon}</span>
-                                    <span>{option.label}</span>
+                                { value: 'spectateur',   label: t('roleSpectateur'),   icon: '👁' },
+                            ].map(opt => (
+                                <label key={opt.value} style={{
+                                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                                    gap: 4, padding: '10px 8px',
+                                    background: form.roleAffiche === opt.value ? 'rgba(0,212,255,.1)' : '#1a1a35',
+                                    border: `1px solid ${form.roleAffiche === opt.value ? '#00d4ff' : '#2a2a4a'}`,
+                                    borderRadius: 8, cursor: 'pointer', fontSize: 12,
+                                    color: form.roleAffiche === opt.value ? '#00d4ff' : '#8888aa',
+                                    transition: 'all .2s',
+                                }}>
+                                    <input type="radio" name="roleAffiche" value={opt.value}
+                                        checked={form.roleAffiche === opt.value} onChange={handleChange}
+                                        style={{ display: 'none' }} />
+                                    <span style={{ fontSize: 20 }}>{opt.icon}</span>
+                                    <span>{opt.label}</span>
                                 </label>
                             ))}
                         </div>
                     </div>
 
-                    {/* ── DATE DE NAISSANCE ── */}
-                    {/* TODO: Activer quand le champ est ajouté au modèle Utilisateur.js
-          <div className="form-group">
-            <label className="form-label">{t('birthDate')}</label>
-            <input
-              className="form-input"
-              type="date"
-              name="date_naissance"
-              value={form.date_naissance}
-              onChange={handleChange}
-              max={new Date().toISOString().split('T')[0]}
-            />
-          </div>
-          */}
-
                     {/* ── CENTRES D'INTÉRÊT ── */}
-                    {/* TODO: Ajouter après création des catégories en base
-          <div className="form-group">
-            <label className="form-label">Centres d'intérêt</label>
-            // Charger GET /api/categories et afficher des checkboxes
-            // Sauvegarder dans POST /api/interests après inscription
-          </div>
-          */}
+                    {categories.length > 0 && (
+                        <div className="form-group">
+                            <label className="form-label">
+                                Centres d'intérêt
+                                <span style={{ color: '#8888aa', marginLeft: 4, fontSize: 11 }}>({t('optional')})</span>
+                            </label>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                {Object.entries(grouped).map(([groupName, cats]) => (
+                                    <div key={groupName}>
+                                        <div style={{ fontSize: 10, color: '#8888aa', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                            {groupName}
+                                        </div>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                            {cats.map(cat => {
+                                                const active = selectedCats.has(cat._id);
+                                                return (
+                                                    <button key={cat._id} type="button"
+                                                        onClick={() => toggleCat(cat._id)}
+                                                        style={{
+                                                            padding: '4px 10px', fontSize: 12, cursor: 'pointer',
+                                                            borderRadius: 20, fontFamily: 'Poppins,sans-serif',
+                                                            background: active ? 'rgba(0,212,255,.15)' : 'transparent',
+                                                            color: active ? '#00d4ff' : '#666688',
+                                                            border: `1px solid ${active ? '#00d4ff' : '#2a2a4a'}`,
+                                                            fontWeight: active ? 600 : 400,
+                                                        }}>
+                                                        {active ? '✓ ' : ''}{cat.event_type || cat.event_categ}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
-                    {/* ── MESSAGE D'ERREUR ── */}
+                    {/* ── ERREUR ── */}
                     {error && (
                         <div className="error-message" role="alert">⚠ {error}</div>
                     )}
@@ -433,9 +426,9 @@ const Register = () => {
                         {loading ? t('loading') : t('createAccount')}
                     </button>
 
-                    {/* ── LIEN RETOUR LOGIN ── */}
+                    {/* ── LIEN LOGIN ── */}
                     <div className="login-links" style={{ justifyContent: 'center' }}>
-                        <span style={{ color: '#8888aa', fontSize: '13px' }}>{t('alreadyAccount')}</span>
+                        <span style={{ color: '#8888aa', fontSize: 13 }}>{t('alreadyAccount')}</span>
                         <Link to="/login" className="link-primary">{t('login')}</Link>
                     </div>
 

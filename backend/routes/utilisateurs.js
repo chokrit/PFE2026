@@ -58,6 +58,40 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken, isAdmin } = require('../middleware/auth');
 const Utilisateur = require('../models/Utilisateur');
+const Interest = require('../models/Interest');
+const Categorie = require('../models/Categorie');
+const cloudinary = require('cloudinary').v2;
+
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key:    process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/utilisateurs/upload-photo
+// Upload une photo de profil vers Cloudinary — utilisateur connecté
+// Body : { image: "data:image/jpeg;base64,..." }
+// ─────────────────────────────────────────────────────────────
+router.post('/upload-photo', verifyToken, async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ success: false, message: 'Image requise' });
+
+        const result = await cloudinary.uploader.upload(image, {
+            folder: 'event-app/profiles',
+            public_id: `user_${req.utilisateur._id}`,
+            overwrite: true,
+            transformation: [{ width: 300, height: 300, crop: 'fill', gravity: 'face' }],
+        });
+
+        console.log(`✅ Photo uploadée : ${result.secure_url}`);
+        return res.json({ success: true, url: result.secure_url });
+    } catch (error) {
+        console.error('❌ Erreur upload photo Cloudinary:', error.message);
+        return res.status(500).json({ success: false, message: 'Erreur upload photo' });
+    }
+});
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/utilisateurs
@@ -95,6 +129,48 @@ router.get('/', verifyToken, isAdmin, async (req, res) => {
             // En développement : afficher le détail de l'erreur
             detail: process.env.NODE_ENV === 'development' ? error.message : undefined,
         });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/utilisateurs/mes-interests
+// Intérêts de l'utilisateur connecté (avec détail catégorie)
+// DOIT être avant GET /:id pour éviter le conflit de route
+// ─────────────────────────────────────────────────────────────
+router.get('/mes-interests', verifyToken, async (req, res) => {
+    try {
+        const interests = await Interest
+            .find({ utilisateur: req.utilisateur._id })
+            .populate('categorie', 'event_categ event_type');
+        return res.json({ success: true, interests });
+    } catch (error) {
+        console.error('❌ Erreur GET /mes-interests:', error.message);
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// PUT /api/utilisateurs/mes-interests
+// Remplace toutes les préférences de l'utilisateur connecté
+// Body : { categories: ['id1', 'id2', ...] }
+// ─────────────────────────────────────────────────────────────
+router.put('/mes-interests', verifyToken, async (req, res) => {
+    try {
+        const { categories } = req.body;
+        const userId = req.utilisateur._id;
+
+        await Interest.deleteMany({ utilisateur: userId });
+
+        if (Array.isArray(categories) && categories.length > 0) {
+            const docs = categories.map(catId => ({ utilisateur: userId, categorie: catId }));
+            await Interest.insertMany(docs);
+        }
+
+        console.log(`✅ Préférences mises à jour pour ${req.utilisateur.email}`);
+        return res.json({ success: true, message: 'Préférences mises à jour' });
+    } catch (error) {
+        console.error('❌ Erreur PUT /mes-interests:', error.message);
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });
 
@@ -209,12 +285,47 @@ router.delete('/:id', verifyToken, isAdmin, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// PUT /api/utilisateurs/mot-de-passe
+// Changer son propre mot de passe — tout utilisateur connecté
+// ─────────────────────────────────────────────────────────────
+router.put('/mot-de-passe', verifyToken, async (req, res) => {
+    try {
+        const { ancien_mot_de_passe, nouveau_mot_de_passe } = req.body;
+
+        if (!ancien_mot_de_passe || !nouveau_mot_de_passe) {
+            return res.status(400).json({ success: false, message: 'Ancien et nouveau mot de passe requis' });
+        }
+        if (nouveau_mot_de_passe.length < 6) {
+            return res.status(400).json({ success: false, message: 'Le nouveau mot de passe doit contenir au moins 6 caractères' });
+        }
+
+        const utilisateur = await Utilisateur.findById(req.utilisateur._id).select('+password_hash');
+        if (!utilisateur) {
+            return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+        }
+
+        const valide = await utilisateur.comparePassword(ancien_mot_de_passe);
+        if (!valide) {
+            return res.status(401).json({ success: false, message: 'Ancien mot de passe incorrect' });
+        }
+
+        utilisateur.password_hash = nouveau_mot_de_passe;
+        await utilisateur.save();
+
+        return res.json({ success: true, message: 'Mot de passe modifié avec succès' });
+    } catch (error) {
+        console.error('❌ Erreur PUT /mot-de-passe:', error.message);
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
 // PUT /api/utilisateurs/profil
 // Modifier son propre profil — tout utilisateur connecté
 // ─────────────────────────────────────────────────────────────
 router.put('/profil', verifyToken, async (req, res) => {
     try {
-        const allowed = ['first_name', 'last_name', 'telephone', 'sexe', 'langue'];
+        const allowed = ['first_name', 'last_name', 'telephone', 'photo', 'langue'];
         const updates = {};
         allowed.forEach(field => {
             if (req.body[field] !== undefined) updates[field] = req.body[field];

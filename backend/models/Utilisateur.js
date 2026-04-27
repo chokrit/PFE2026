@@ -33,6 +33,11 @@ const utilisateurSchema = new mongoose.Schema({
         // Optionnel — non requis à l'inscription
     },
 
+    date_naissance: {
+        type: Date
+        // Optionnel — utilisé pour calcul d'âge
+    },
+
     // ── Authentification ──
     email: {
         type: String,
@@ -70,6 +75,13 @@ const utilisateurSchema = new mongoose.Schema({
         // ⚠️ SÉCURITÉ : Ce champ ne doit JAMAIS être modifiable
         //    via /api/auth/register ou /api/utilisateurs/:id (PUT normal)
         //    Seul /api/utilisateurs/:id/role (isAdmin middleware) peut le changer
+    },
+
+    // ── Photo de profil ──
+    photo: {
+        type: String,
+        default: ''
+        // URL ou base64 de la photo de profil
     },
 
     // ── Préférences ──

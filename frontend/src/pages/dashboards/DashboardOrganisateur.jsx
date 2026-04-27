@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useLanguage } from '../../context/LanguageContext';
 import api from '../../api';
 import StatCard from '../../components/dashboard/StatCard';
+import MonEspaceModal from '../../components/dashboard/MonEspaceModal';
 import '../../styles/dashboard/dashboard.css';
 import '../../styles/dashboard/organisateur.css';
 
@@ -32,6 +33,7 @@ const DashboardOrganisateur = () => {
     const [savingProfil, setSavingProfil] = useState(false);
 
     const [qrEventId, setQrEventId] = useState('');
+    const [showMonEspace, setShowMonEspace] = useState(false);
 
     useEffect(() => {
         const token = localStorage.getItem('event_token');
@@ -156,6 +158,14 @@ const DashboardOrganisateur = () => {
     return (
         <div className={`dashboard-page orga-page ${isRTL ? 'rtl' : ''}`}>
 
+            {showMonEspace && (
+                <MonEspaceModal
+                    utilisateur={organisateur}
+                    onClose={() => setShowMonEspace(false)}
+                    onUpdate={(u) => setOrganisateur(u)}
+                />
+            )}
+
             {notification && (
                 <div className={`dash-notif dash-notif--${notification.type}`}>
                     {notification.type === 'success' ? '✓' : '⚠'} {notification.msg}
@@ -172,7 +182,14 @@ const DashboardOrganisateur = () => {
                     {organisateur?.role === 'admin' && (
                         <Link to="/admin" className="dash-btn-ghost">Panneau Admin</Link>
                     )}
-                    <Link to="/dashboards" className="dash-btn-ghost">Mon espace</Link>
+                    <button
+                        className="dash-btn-ghost"
+                        onClick={() => setShowMonEspace(true)}
+                        title="Modifier vos informations personnelles et votre mot de passe"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                    >
+                        👤 Mon compte
+                    </button>
                     <span className="dash-username">{organisateur?.first_name}</span>
                     <button className="dash-btn-logout" onClick={() => { localStorage.clear(); navigate('/login'); }}>
                         Déconnexion

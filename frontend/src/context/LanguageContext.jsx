@@ -742,7 +742,7 @@ export const LanguageProvider = ({ children }) => {
   const [langue, setLangueState] = useState(() => {
     const saved = localStorage.getItem('event_langue');
     // Vérifier que la langue sauvegardée existe vraiment dans translations
-    return translations[saved] ? saved : 'fr';
+    return translations[saved] ? saved : 'ar';
   });
 
   // Langues qui s'écrivent de droite à gauche

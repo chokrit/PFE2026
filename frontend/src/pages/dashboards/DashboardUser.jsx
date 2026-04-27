@@ -18,6 +18,7 @@ import StatCard from '../../components/dashboard/StatCard';
 import EventCard from '../../components/dashboard/EventCard';
 import RewardCard from '../../components/dashboard/RewardCard';
 import QRModal from '../../components/dashboard/QRModal';
+import MonEspaceModal from '../../components/dashboard/MonEspaceModal';
 import '../../styles/dashboard/dashboard.css';
 
 const DashboardUser = () => {
@@ -37,6 +38,12 @@ const DashboardUser = () => {
   const [notif, setNotif] = useState(null);
 
   // Formulaire création
+  const [profilForm, setProfilForm] = useState({
+    first_name: '', last_name: '', telephone: '', sexe: '', langue: 'fr',
+  });
+  const [savingProfil, setSavingProfil] = useState(false);
+
+  const [showMonEspace, setShowMonEspace] = useState(false);
   const [modalCreer, setModalCreer] = useState(false);
   const [savingEvent, setSavingEvent] = useState(false);
   const [form, setForm] = useState({
@@ -52,6 +59,13 @@ const DashboardUser = () => {
     if (user) {
       const u = JSON.parse(user);
       setUtilisateur(u);
+      setProfilForm({
+        first_name: u.first_name || '',
+        last_name: u.last_name || '',
+        telephone: u.telephone || '',
+        sexe: u.sexe || '',
+        langue: u.langue || 'fr',
+      });
     }
     charger();
   }, [navigate]);
@@ -93,6 +107,34 @@ const DashboardUser = () => {
       setActiveTab('inscrits');
     } catch (err) {
       flash('error', err.response?.data?.message || 'Erreur inscription');
+    }
+  };
+
+  const annulerInscription = async (eventId) => {
+    if (!window.confirm('Annuler votre inscription à cet événement ?')) return;
+    try {
+      await api.delete(`/participations/${eventId}/annuler`);
+      flash('success', 'Inscription annulée');
+      charger();
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur annulation');
+    }
+  };
+
+  const sauvegarderProfil = async (e) => {
+    e.preventDefault();
+    setSavingProfil(true);
+    try {
+      const res = await api.put('/utilisateurs/profil', profilForm);
+      const updated = res.data.utilisateur;
+      const stored = { ...utilisateur, ...updated };
+      localStorage.setItem('event_user', JSON.stringify(stored));
+      setUtilisateur(stored);
+      flash('success', 'Profil mis à jour');
+    } catch {
+      flash('error', 'Erreur mise à jour profil');
+    } finally {
+      setSavingProfil(false);
     }
   };
 
@@ -280,14 +322,29 @@ const DashboardUser = () => {
             <span>{niveau.label}</span>
           </div>
           <div className="dash-user-chip">
-            <div className="dash-avatar">
-              {utilisateur?.first_name?.[0]}{utilisateur?.last_name?.[0]}
+            <div className="dash-avatar" style={{ overflow: 'hidden', padding: utilisateur?.photo ? 0 : undefined }}>
+              {utilisateur?.photo
+                ? <img src={utilisateur.photo} alt="avatar"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                : <>{utilisateur?.first_name?.[0]}{utilisateur?.last_name?.[0]}</>
+              }
             </div>
             <span className="dash-username">{utilisateur?.first_name} {utilisateur?.last_name}</span>
           </div>
           {utilisateur?.role === 'admin' && (
             <Link to="/admin" className="dash-btn-ghost">Panneau Admin</Link>
           )}
+          {utilisateur?.role === 'organisateur' && (
+            <Link to="/organisateur" className="dash-btn-ghost">Mon espace organisateur</Link>
+          )}
+          <button
+            className="dash-btn-ghost"
+            onClick={() => setShowMonEspace(true)}
+            title="Modifier vos informations personnelles et votre mot de passe"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            👤 Mon compte
+          </button>
           <button className="dash-btn-logout" onClick={handleLogout}>Déconnexion</button>
         </div>
       </header>
@@ -337,6 +394,7 @@ const DashboardUser = () => {
             { key: 'explorer', label: 'Explorer', count: evenementsDispos.length, color: '' },
             { key: 'creations', label: 'Mes créations', count: mesCreations.length, color: '#9c27b0' },
             { key: 'recompenses', label: 'Récompenses', count: mesRecompenses.filter(r => !r.is_redeemed).length, color: '#ff6b00' },
+            { key: 'profil', label: 'Mon profil', count: 0, color: '' },
           ].map(t => (
             <button key={t.key} className={`dash-tab ${activeTab === t.key ? 'active' : ''}`} onClick={() => setActiveTab(t.key)}>
               {t.label}
@@ -363,7 +421,8 @@ const DashboardUser = () => {
               <div className="dash-events-grid">
                 {mesInscriptions.map(ins => (
                   <EventCard key={ins.id} event={ins} mode="inscrit"
-                    onVoirQR={() => setQrModal({ eventId: ins.eventId, token: ins.qr_token, titre: ins.titre })} />
+                    onVoirQR={() => setQrModal({ eventId: ins.eventId, token: ins.qr_token, titre: ins.titre })}
+                    onAnnuler={() => annulerInscription(ins.eventId)} />
                 ))}
               </div>
             )
@@ -474,10 +533,91 @@ const DashboardUser = () => {
               </div>
             )
           )}
+          {/* ── Mon profil ── */}
+          {activeTab === 'profil' && (
+            <div style={{ maxWidth: '520px' }}>
+              <div className="orga-form-card">
+                <form onSubmit={sauvegarderProfil} className="admin-form">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Prénom *</label>
+                      <input type="text" value={profilForm.first_name}
+                        onChange={e => setProfilForm({ ...profilForm, first_name: e.target.value })} required />
+                    </div>
+                    <div className="form-group">
+                      <label>Nom *</label>
+                      <input type="text" value={profilForm.last_name}
+                        onChange={e => setProfilForm({ ...profilForm, last_name: e.target.value })} required />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label>Téléphone</label>
+                    <input type="tel" value={profilForm.telephone}
+                      onChange={e => setProfilForm({ ...profilForm, telephone: e.target.value })}
+                      placeholder="+216 XX XXX XXX" />
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Sexe</label>
+                      <select value={profilForm.sexe}
+                        onChange={e => setProfilForm({ ...profilForm, sexe: e.target.value })}
+                        style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
+                        <option value="">— Non précisé —</option>
+                        <option value="homme">Homme</option>
+                        <option value="femme">Femme</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Langue</label>
+                      <select value={profilForm.langue}
+                        onChange={e => setProfilForm({ ...profilForm, langue: e.target.value })}
+                        style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
+                        <option value="fr">Français</option>
+                        <option value="en">English</option>
+                        <option value="ar">العربية</option>
+                        <option value="ar-tn">تونسي</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '1rem' }}>
+                    <button type="submit" className="dash-btn-primary" disabled={savingProfil}>
+                      {savingProfil ? 'Enregistrement...' : 'Sauvegarder'}
+                    </button>
+                  </div>
+                </form>
+
+                <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid #2a2a4a' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '1rem', color: '#8888aa' }}>Mes statistiques</h3>
+                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: '110px', background: '#0a0a1a', borderRadius: '10px', padding: '12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 700, color: '#00d4ff' }}>{utilisateur?.cumul_points || 0}</div>
+                      <div style={{ fontSize: '11px', color: '#8888aa', marginTop: '4px' }}>Points</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: '110px', background: '#0a0a1a', borderRadius: '10px', padding: '12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 700, color: '#00e676' }}>{utilisateur?.cumul_heures_participation || 0}h</div>
+                      <div style={{ fontSize: '11px', color: '#8888aa', marginTop: '4px' }}>Heures</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: '110px', background: '#0a0a1a', borderRadius: '10px', padding: '12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 700, color: '#ffd700' }}>{utilisateur?.reliabilite_score ?? 100}%</div>
+                      <div style={{ fontSize: '11px', color: '#8888aa', marginTop: '4px' }}>Fiabilité</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </main>
 
       {qrModal && <QRModal token={qrModal.token} titre={qrModal.titre} onClose={() => setQrModal(null)} />}
+      {showMonEspace && (
+        <MonEspaceModal
+          utilisateur={utilisateur}
+          onClose={() => setShowMonEspace(false)}
+          onUpdate={(u) => setUtilisateur(u)}
+        />
+      )}
     </div>
   );
 };

@@ -15,6 +15,8 @@ const {
   modifierEvenement,
   supprimerEvenement,
   qrScan,
+  getSuggestions,
+  noterEvenement,
 } = require('../controllers/evenementController');
 
 // GET /api/evenements — Événements publiés (accessible sans connexion)
@@ -25,6 +27,10 @@ router.get('/all', verifyToken, isAdmin, getTousEvenements);
 
 // GET /api/evenements/mes-evenements — Mes événements créés (connecté)
 router.get('/mes-evenements', verifyToken, getMesEvenements);
+
+// GET /api/evenements/suggestions — Événements recommandés (connecté)
+// DOIT être avant /:id sinon Express capterait "suggestions" comme un id
+router.get('/suggestions', verifyToken, getSuggestions);
 
 // GET /api/evenements/:id — Détail d'un événement
 router.get('/:id', getEvenement);
@@ -40,5 +46,8 @@ router.delete('/:id', verifyToken, supprimerEvenement);
 
 // POST /api/evenements/:id/qr-scan — Scanner présence via QR code
 router.post('/:id/qr-scan', verifyToken, qrScan);
+
+// POST /api/evenements/:id/noter — Noter un événement (présent)
+router.post('/:id/noter', verifyToken, noterEvenement);
 
 module.exports = router;

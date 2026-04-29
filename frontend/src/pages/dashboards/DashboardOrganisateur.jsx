@@ -3,7 +3,11 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useLanguage } from '../../context/LanguageContext';
 import api from '../../api';
 import StatCard from '../../components/dashboard/StatCard';
+import EventCard from '../../components/dashboard/EventCard';
+import RewardCard from '../../components/dashboard/RewardCard';
+import QRModal from '../../components/dashboard/QRModal';
 import MonEspaceModal from '../../components/dashboard/MonEspaceModal';
+import NotificationBell from '../../components/dashboard/NotificationBell';
 import '../../styles/dashboard/dashboard.css';
 import '../../styles/dashboard/organisateur.css';
 
@@ -35,6 +39,20 @@ const DashboardOrganisateur = () => {
     const [qrEventId, setQrEventId] = useState('');
     const [showMonEspace, setShowMonEspace] = useState(false);
 
+    // ── État du scanner de présence ───────────────────────
+    const [scanToken, setScanToken]         = useState('');
+    const [scanResultat, setScanResultat]   = useState(null);
+    const [scanErreur, setScanErreur]       = useState('');
+    const [scanEnCours, setScanEnCours]     = useState(false);
+    const [envoisAbsents, setEnvoisAbsents] = useState({});
+
+    // ── Participation aux événements (comme un utilisateur) ─
+    const [mesInscriptions, setMesInscriptions] = useState([]);
+    const [evenementsDispos, setEvenementsDispos] = useState([]);
+    const [mesRecompenses, setMesRecompenses]     = useState([]);
+    const [suggestions, setSuggestions]           = useState([]);
+    const [qrModal, setQrModal]                   = useState(null);
+
     useEffect(() => {
         const token = localStorage.getItem('event_token');
         const user = localStorage.getItem('event_user');
@@ -57,10 +75,22 @@ const DashboardOrganisateur = () => {
     const chargerMesEvents = async () => {
         setLoading(true);
         try {
-            const res = await api.get('/evenements/mes-evenements');
-            setMesEvents(res.data.evenements || []);
+            const [evsR, inscR, dispoR, suggR] = await Promise.allSettled([
+                api.get('/evenements/mes-evenements'),
+                api.get('/participations/mes-inscriptions'),
+                api.get('/evenements'),
+                api.get('/evenements/suggestions'),
+            ]);
+            if (evsR.status === 'fulfilled')   setMesEvents(evsR.value.data.evenements || []);
+            if (inscR.status === 'fulfilled')  setMesInscriptions(inscR.value.data.participations || []);
+            if (dispoR.status === 'fulfilled') setEvenementsDispos(dispoR.value.data.evenements || []);
+            if (suggR.status === 'fulfilled')  setSuggestions(suggR.value.data.suggestions || []);
+            try {
+                const rew = await api.get('/recompenses/mes-coupons');
+                setMesRecompenses(rew.data.coupons || []);
+            } catch { setMesRecompenses([]); }
         } catch {
-            notif('error', 'Erreur chargement événements');
+            notif('error', 'Erreur chargement données');
         } finally {
             setLoading(false);
         }
@@ -139,12 +169,99 @@ const DashboardOrganisateur = () => {
         setActiveTab('participants');
     };
 
+    const sInscrire = async (eventId) => {
+        try {
+            await api.post(`/participations/${eventId}/inscription`);
+            notif('success', 'Inscription confirmée !');
+            chargerMesEvents();
+            setActiveTab('mes-inscriptions');
+        } catch (err) {
+            notif('error', err.response?.data?.message || 'Erreur inscription');
+        }
+    };
+
+    const annulerInscription = async (eventId) => {
+        if (!window.confirm('Annuler votre inscription ?')) return;
+        try {
+            await api.delete(`/participations/${eventId}/annuler`);
+            notif('success', 'Inscription annulée');
+            chargerMesEvents();
+        } catch (err) {
+            notif('error', err.response?.data?.message || 'Erreur annulation');
+        }
+    };
+
+    // ── Soumettre un token QR pour valider une présence ──
+    const soumettreScan = async (e) => {
+        e.preventDefault();
+        const token = scanToken.trim();
+        if (!token) return;
+
+        setScanEnCours(true);
+        setScanResultat(null);
+        setScanErreur('');
+
+        try {
+            const res = await api.post('/participations/valider-presence', { qr_token: token });
+            setScanResultat(res.data.participant); // objet avec prenom, points, niveau…
+            setScanToken('');                       // vider le champ pour le prochain scan
+        } catch (err) {
+            // Le backend renvoie un message d'erreur précis (fenêtre horaire, déjà utilisé…)
+            setScanErreur(err.response?.data?.message || 'Erreur lors de la validation');
+        } finally {
+            setScanEnCours(false);
+        }
+    };
+
+    // ── Envoyer un message d'encouragement aux absents ──
+    const envoyerAbsents = async (eventId) => {
+        setEnvoisAbsents(prev => ({ ...prev, [eventId]: 'sending' }));
+        try {
+            const res = await api.post(`/participations/message-absents/${eventId}`);
+            notif('success', res.data.message);
+            setEnvoisAbsents(prev => ({ ...prev, [eventId]: 'done' }));
+        } catch (err) {
+            notif('error', err.response?.data?.message || 'Erreur envoi messages');
+            setEnvoisAbsents(prev => ({ ...prev, [eventId]: 'error' }));
+        }
+    };
+
+    // ── Calculer si le scan est autorisé en ce moment ───
+    // Retourne : 'avant' | 'pendant' | 'apres' | 'autre_jour'
+    const statutFenetreHoraire = (ev) => {
+        if (!ev?.ev_start_time) return 'autre_jour';
+        const maintenant = new Date();
+        const debut      = new Date(ev.ev_start_time);
+        const fin        = ev.ev_end_time ? new Date(ev.ev_end_time) : null;
+
+        // Même jour calendaire ?
+        const memeJour =
+            maintenant.getFullYear() === debut.getFullYear() &&
+            maintenant.getMonth()    === debut.getMonth()    &&
+            maintenant.getDate()     === debut.getDate();
+
+        if (!memeJour)            return maintenant < debut ? 'avant' : 'apres';
+        if (maintenant < debut)   return 'avant';
+        if (fin && maintenant > fin) return 'apres';
+        return 'pendant'; // ✅ fenêtre ouverte
+    };
+
     const getStatutColor = (s) => ({
         'publié': '#00e676', 'brouillon': '#ff6b00', 'annulé': '#ff4d6d', 'terminé': '#888'
     }[s] || '#888');
 
     const totalInscrits = mesEvents.reduce((s, e) => s + (e.nb_inscrits || 0), 0);
-    const eventQR = mesEvents.find(e => e._id === qrEventId);
+
+    // ── Variables du scanner (calculées ici pour éviter un IIFE dans le JSX) ──
+    const evScan      = mesEvents.find(e => e._id === qrEventId) || null;
+    const fenetre     = evScan ? statutFenetreHoraire(evScan) : null;
+    const fenetreInfo = fenetre ? ({
+        pendant:    { color: '#00e676', bg: 'rgba(0,230,118,.12)',    label: '🟢 Scan autorisé — événement en cours' },
+        avant:      { color: '#ff6b00', bg: 'rgba(255,107,0,.10)',    label: '🟡 Événement pas encore commencé' },
+        apres:      { color: '#8888aa', bg: 'rgba(136,136,170,.10)', label: '⬜ Événement terminé' },
+        autre_jour: { color: '#ff4d6d', bg: 'rgba(255,77,109,.10)',  label: "🔴 Le scan n'est autorisé que le jour de l'événement" },
+    }[fenetre] || null) : null;
+    const estTermine  = fenetre === 'apres';
 
     if (loading) {
         return (
@@ -182,6 +299,7 @@ const DashboardOrganisateur = () => {
                     {organisateur?.role === 'admin' && (
                         <Link to="/admin" className="dash-btn-ghost">Panneau Admin</Link>
                     )}
+                    <NotificationBell />
                     <button
                         className="dash-btn-ghost"
                         onClick={() => setShowMonEspace(true)}
@@ -208,10 +326,13 @@ const DashboardOrganisateur = () => {
 
                 <div className="dash-tabs" style={{ marginBottom: '1.5rem' }}>
                     {[
-                        { key: 'mes-events', label: 'Mes événements' },
-                        { key: 'scanner', label: '📷 QR Code' },
-                        { key: 'participants', label: 'Participants' },
-                        { key: 'profil', label: 'Mon profil' },
+                        { key: 'mes-events',       label: 'Mes événements' },
+                        { key: 'scanner',          label: '📷 QR Code' },
+                        { key: 'participants',     label: 'Participants' },
+                        { key: 'explorer',         label: '🔍 Explorer' },
+                        { key: 'mes-inscriptions', label: 'Mes inscriptions', badge: mesInscriptions.length },
+                        { key: 'recompenses',      label: '🎫 Récompenses',  badge: mesRecompenses.filter(r => !r.is_redeemed).length },
+                        { key: 'profil',           label: 'Mon profil' },
                     ].map(t => (
                         <button
                             key={t.key}
@@ -219,6 +340,9 @@ const DashboardOrganisateur = () => {
                             onClick={() => setActiveTab(t.key)}
                         >
                             {t.label}
+                            {t.badge > 0 && (
+                                <span className="dash-tab-badge">{t.badge}</span>
+                            )}
                         </button>
                     ))}
                 </div>
@@ -253,10 +377,20 @@ const DashboardOrganisateur = () => {
                                         <div className="form-group">
                                             <label>Début *</label>
                                             <input type="datetime-local" value={formEvent.ev_start_time}
-                                                onChange={e => setFormEvent({ ...formEvent, ev_start_time: e.target.value })} required />
+                                                onChange={e => {
+                                                    const start = e.target.value;
+                                                    let autoFin = '';
+                                                    if (start) {
+                                                        const d = new Date(start);
+                                                        d.setHours(d.getHours() + 1);
+                                                        const p = n => String(n).padStart(2, '0');
+                                                        autoFin = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+                                                    }
+                                                    setFormEvent({ ...formEvent, ev_start_time: start, ev_end_time: autoFin });
+                                                }} required />
                                         </div>
                                         <div className="form-group">
-                                            <label>Fin</label>
+                                            <label>Fin <span style={{ fontSize: 10, color: '#666' }}>(auto +1h, modifiable)</span></label>
                                             <input type="datetime-local" value={formEvent.ev_end_time}
                                                 onChange={e => setFormEvent({ ...formEvent, ev_end_time: e.target.value })} />
                                         </div>
@@ -332,69 +466,256 @@ const DashboardOrganisateur = () => {
                     </div>
                 )}
 
-                {/* ── QR CODE ── */}
+                {/* ── SCANNER DE PRÉSENCE ── */}
                 {activeTab === 'scanner' && (
-                    <div className="orga-scanner-section">
-                        <h2 className="dash-section-title">QR Code de présence</h2>
-                        <p className="dash-section-desc">
-                            Partagez ce token avec les participants pour qu'ils confirment leur présence.
-                        </p>
+                        <div className="orga-scanner-section">
+                            <h2 className="dash-section-title">Validation des présences</h2>
+                            <p className="dash-section-desc">
+                                Scannez ou saisissez le token QR personnel de chaque participant pour confirmer sa présence.
+                                Le scan n'est accepté que le jour exact de l'événement, entre l'heure de début et de fin.
+                            </p>
 
-                        <div className="orga-scanner-card">
-                            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                                <label className="dash-section-desc" style={{ marginBottom: '8px', display: 'block' }}>
-                                    Sélectionner un événement :
-                                </label>
-                                <select
-                                    value={qrEventId}
-                                    onChange={e => setQrEventId(e.target.value)}
-                                    style={{ background: '#1a1a35', color: '#e8e8f0', padding: '8px 12px', borderRadius: '8px', border: '1px solid #2a2a4a', width: '100%', cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
-                                    <option value="">— Choisir un événement publié —</option>
-                                    {mesEvents.filter(e => e.stat_event === 'publié').map(e => (
-                                        <option key={e._id} value={e._id}>{e.title_event}</option>
-                                    ))}
-                                </select>
+                            {/* ── Sélecteur d'événement ── */}
+                            <div className="orga-scanner-card">
+                                <div className="form-group" style={{ marginBottom: fenetreInfo ? '1rem' : '1.5rem' }}>
+                                    <label style={{ fontSize: 13, color: '#8888aa', marginBottom: 6, display: 'block' }}>
+                                        Événement à scanner :
+                                    </label>
+                                    <select
+                                        value={qrEventId}
+                                        onChange={e => {
+                                            setQrEventId(e.target.value);
+                                            // Réinitialiser le résultat précédent quand on change d'événement
+                                            setScanResultat(null);
+                                            setScanErreur('');
+                                            setScanToken('');
+                                        }}
+                                        style={{
+                                            background: '#1a1a35', color: '#e8e8f0',
+                                            padding: '8px 12px', borderRadius: '8px',
+                                            border: '1px solid #2a2a4a', width: '100%',
+                                            cursor: 'pointer', fontFamily: 'Poppins,sans-serif',
+                                        }}
+                                    >
+                                        <option value="">— Choisir un événement publié —</option>
+                                        {mesEvents.filter(e => e.stat_event === 'publié').map(e => (
+                                            <option key={e._id} value={e._id}>{e.title_event}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* ── Indicateur fenêtre horaire ── */}
+                                {fenetreInfo && (
+                                    <div style={{
+                                        padding: '10px 14px', borderRadius: 8, marginBottom: '1.5rem',
+                                        background: fenetreInfo.bg,
+                                        border: `1px solid ${fenetreInfo.color}44`,
+                                        fontSize: 13, color: fenetreInfo.color, fontWeight: 600,
+                                    }}>
+                                        {fenetreInfo.label}
+                                        {evScan?.ev_start_time && (
+                                            <span style={{ fontWeight: 400, color: '#8888aa', marginLeft: 10 }}>
+                                                {new Date(evScan.ev_start_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                                {evScan.ev_end_time && ` → ${new Date(evScan.ev_end_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`}
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* ── Formulaire de saisie du token ── */}
+                                {evScan && (
+                                    <form onSubmit={soumettreScan}>
+                                        <div className="form-group" style={{ marginBottom: '1rem' }}>
+                                            <label style={{ fontSize: 13, color: '#8888aa', marginBottom: 6, display: 'block' }}>
+                                                Token QR du participant :
+                                            </label>
+                                            <div style={{ display: 'flex', gap: 8 }}>
+                                                <input
+                                                    type="text"
+                                                    value={scanToken}
+                                                    onChange={e => {
+                                                        setScanToken(e.target.value);
+                                                        // Effacer l'erreur précédente dès que l'utilisateur retape
+                                                        setScanErreur('');
+                                                        setScanResultat(null);
+                                                    }}
+                                                    placeholder="Collez ou scannez le token du participant…"
+                                                    style={{
+                                                        flex: 1, background: '#0a0a1a', color: '#e8e8f0',
+                                                        border: '1px solid #2a2a4a', borderRadius: 8,
+                                                        padding: '10px 14px', fontFamily: 'monospace',
+                                                        fontSize: 13,
+                                                    }}
+                                                    autoFocus
+                                                />
+                                                <button
+                                                    type="submit"
+                                                    className="dash-btn-primary"
+                                                    disabled={scanEnCours || !scanToken.trim()}
+                                                    style={{ whiteSpace: 'nowrap' }}
+                                                >
+                                                    {scanEnCours ? '…' : '✓ Valider'}
+                                                </button>
+                                            </div>
+                                            <p style={{ fontSize: 11, color: '#555', marginTop: 6 }}>
+                                                💡 Demandez au participant d'afficher son QR code, puis copiez son token ici.
+                                            </p>
+                                        </div>
+                                    </form>
+                                )}
+
+                                {/* ── Résultat du scan — succès ── */}
+                                {scanResultat && (
+                                    <div style={{
+                                        marginTop: '1rem', padding: '16px 18px',
+                                        background: 'rgba(0,230,118,.08)',
+                                        border: '1px solid rgba(0,230,118,.3)',
+                                        borderRadius: 12,
+                                    }}>
+                                        {/* En-tête : nom du participant */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                                            <div style={{
+                                                width: 48, height: 48, borderRadius: '50%',
+                                                background: '#00e67622', border: '2px solid #00e676',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontSize: 20, fontWeight: 700, color: '#00e676',
+                                            }}>
+                                                {scanResultat.prenom?.[0]}{scanResultat.nom?.[0]}
+                                            </div>
+                                            <div>
+                                                <div style={{ fontWeight: 700, color: '#00e676', fontSize: 16 }}>
+                                                    ✅ {scanResultat.prenom} {scanResultat.nom}
+                                                </div>
+                                                <div style={{ fontSize: 12, color: '#8888aa' }}>
+                                                    Présence confirmée · Fiabilité {scanResultat.fiabilite}%
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Stats gagnées */}
+                                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                                            <div style={{
+                                                flex: 1, minWidth: 90, background: '#0a0a1a',
+                                                borderRadius: 8, padding: '10px 12px', textAlign: 'center',
+                                            }}>
+                                                <div style={{ fontSize: 20, fontWeight: 700, color: '#00d4ff' }}>
+                                                    +{scanResultat.points_gagnes}
+                                                </div>
+                                                <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>points gagnés</div>
+                                            </div>
+                                            <div style={{
+                                                flex: 1, minWidth: 90, background: '#0a0a1a',
+                                                borderRadius: 8, padding: '10px 12px', textAlign: 'center',
+                                            }}>
+                                                <div style={{ fontSize: 20, fontWeight: 700, color: '#ffd700' }}>
+                                                    {scanResultat.cumul_points}
+                                                </div>
+                                                <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>total points</div>
+                                            </div>
+                                            <div style={{
+                                                flex: 1, minWidth: 90, background: '#0a0a1a',
+                                                borderRadius: 8, padding: '10px 12px', textAlign: 'center',
+                                            }}>
+                                                <div style={{ fontSize: 14, fontWeight: 700, color: '#a78bfa' }}>
+                                                    {scanResultat.niveau_apres}
+                                                </div>
+                                                <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>niveau</div>
+                                            </div>
+                                        </div>
+
+                                        {/* Passage de niveau */}
+                                        {scanResultat.passage_niveau && (
+                                            <div style={{
+                                                marginTop: 10, padding: '8px 12px',
+                                                background: 'rgba(167,139,250,.15)',
+                                                border: '1px solid rgba(167,139,250,.3)',
+                                                borderRadius: 8, fontSize: 13,
+                                                color: '#a78bfa', fontWeight: 600, textAlign: 'center',
+                                            }}>
+                                                🏆 Passage de niveau : {scanResultat.niveau_avant} → {scanResultat.niveau_apres}
+                                            </div>
+                                        )}
+
+                                        {/* Coupon débloqué */}
+                                        {scanResultat.coupon_declenche && (
+                                            <div style={{
+                                                marginTop: 8, padding: '8px 12px',
+                                                background: 'rgba(255,107,0,.12)',
+                                                border: '1px solid rgba(255,107,0,.3)',
+                                                borderRadius: 8, fontSize: 13,
+                                                color: '#ff6b00', fontWeight: 600, textAlign: 'center',
+                                            }}>
+                                                🎫 Un coupon de réduction a été débloqué pour ce participant !
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* ── Résultat du scan — erreur ── */}
+                                {scanErreur && (
+                                    <div style={{
+                                        marginTop: '1rem', padding: '12px 16px',
+                                        background: 'rgba(255,77,109,.08)',
+                                        border: '1px solid rgba(255,77,109,.3)',
+                                        borderRadius: 10, fontSize: 13,
+                                        color: '#ff4d6d', fontWeight: 500,
+                                    }}>
+                                        {scanErreur}
+                                    </div>
+                                )}
+
+                                {/* ── Aucun événement sélectionné ── */}
+                                {!evScan && (
+                                    <div className="orga-qr-zone">
+                                        <div className="orga-qr-icon">
+                                            <svg viewBox="0 0 100 100" width="80" height="80" fill="none" stroke="currentColor" strokeWidth="3">
+                                                <rect x="10" y="10" width="30" height="30" rx="2" />
+                                                <rect x="60" y="10" width="30" height="30" rx="2" />
+                                                <rect x="10" y="60" width="30" height="30" rx="2" />
+                                                <rect x="17" y="17" width="16" height="16" fill="currentColor" opacity="0.3" />
+                                                <rect x="67" y="17" width="16" height="16" fill="currentColor" opacity="0.3" />
+                                                <rect x="17" y="67" width="16" height="16" fill="currentColor" opacity="0.3" />
+                                            </svg>
+                                        </div>
+                                        <p className="orga-qr-hint">Sélectionnez un événement publié ci-dessus</p>
+                                    </div>
+                                )}
                             </div>
 
-                            {eventQR ? (
-                                eventQR.qr_code_token ? (
-                                    <div style={{ textAlign: 'center' }}>
-                                        <p style={{ color: '#8888aa', fontSize: '13px', marginBottom: '12px' }}>
-                                            Token QR pour <strong style={{ color: '#e8e8f0' }}>{eventQR.title_event}</strong> :
-                                        </p>
-                                        <div style={{
-                                            background: '#0a0a1a', border: '1px solid #2a2a4a', borderRadius: '12px',
-                                            padding: '16px', fontFamily: 'monospace', fontSize: '12px',
-                                            color: '#00d4ff', wordBreak: 'break-all', lineHeight: '1.6', textAlign: 'left',
-                                        }}>
-                                            {eventQR.qr_code_token}
+                            {/* ── Message aux absents (visible seulement après la fin) ── */}
+                            {evScan && estTermine && (
+                                <div style={{
+                                    marginTop: '1.5rem', padding: '16px 18px',
+                                    background: 'rgba(0,212,255,.06)',
+                                    border: '1px solid rgba(0,212,255,.2)',
+                                    borderRadius: 12,
+                                    display: 'flex', justifyContent: 'space-between',
+                                    alignItems: 'center', gap: 14, flexWrap: 'wrap',
+                                }}>
+                                    <div>
+                                        <div style={{ fontWeight: 600, color: '#e8e8f0', fontSize: 14 }}>
+                                            💙 Envoyer un message aux absents
                                         </div>
-                                        <p style={{ color: '#8888aa', fontSize: '11px', marginTop: '8px' }}>
-                                            Les participants copient ce token dans leur tableau de bord → Mes inscriptions → Scanner
-                                        </p>
+                                        <div style={{ fontSize: 12, color: '#8888aa', marginTop: 4 }}>
+                                            Un message chaleureux et encourageant sera envoyé à chaque participant absent.
+                                        </div>
                                     </div>
-                                ) : (
-                                    <p style={{ color: '#ff6b00', textAlign: 'center', padding: '1rem' }}>
-                                        Cet événement n'a pas de token QR. Publiez-le d'abord.
-                                    </p>
-                                )
-                            ) : (
-                                <div className="orga-qr-zone">
-                                    <div className="orga-qr-icon">
-                                        <svg viewBox="0 0 100 100" width="80" height="80" fill="none" stroke="currentColor" strokeWidth="3">
-                                            <rect x="10" y="10" width="30" height="30" rx="2" />
-                                            <rect x="60" y="10" width="30" height="30" rx="2" />
-                                            <rect x="10" y="60" width="30" height="30" rx="2" />
-                                            <rect x="17" y="17" width="16" height="16" fill="currentColor" opacity="0.3" />
-                                            <rect x="67" y="17" width="16" height="16" fill="currentColor" opacity="0.3" />
-                                            <rect x="17" y="67" width="16" height="16" fill="currentColor" opacity="0.3" />
-                                        </svg>
-                                    </div>
-                                    <p className="orga-qr-hint">Sélectionnez un événement publié ci-dessus</p>
+                                    <button
+                                        className="dash-btn-primary"
+                                        disabled={envoisAbsents[qrEventId] === 'sending' || envoisAbsents[qrEventId] === 'done'}
+                                        onClick={() => envoyerAbsents(qrEventId)}
+                                        style={{
+                                            // Griser le bouton si déjà envoyé
+                                            opacity: envoisAbsents[qrEventId] === 'done' ? 0.6 : 1,
+                                        }}
+                                    >
+                                        {envoisAbsents[qrEventId] === 'sending' && '⏳ Envoi…'}
+                                        {envoisAbsents[qrEventId] === 'done'    && '✓ Envoyé'}
+                                        {!envoisAbsents[qrEventId]             && '📩 Envoyer'}
+                                    </button>
                                 </div>
                             )}
                         </div>
-                    </div>
                 )}
 
                 {/* ── PARTICIPANTS ── */}
@@ -479,6 +800,92 @@ const DashboardOrganisateur = () => {
                     </div>
                 )}
 
+                {/* ── EXPLORER ── */}
+                {activeTab === 'explorer' && (
+                    <div>
+                        {suggestions.length > 0 && (
+                            <div style={{ marginBottom: 24 }}>
+                                <h3 style={{ fontSize: 14, fontWeight: 600, color: '#a78bfa', marginBottom: 12 }}>✨ Recommandé pour vous</h3>
+                                <div className="dash-events-grid">
+                                    {suggestions.slice(0, 4).map(ev => (
+                                        <div key={ev._id} style={{ position: 'relative' }}>
+                                            <span style={{ position: 'absolute', top: 8, right: 8, background: '#a78bfa22', color: '#a78bfa', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600, zIndex: 1 }}>
+                                                {Math.round((ev.score || 0) * 100)}% match
+                                            </span>
+                                            <EventCard event={{ ...ev, id: ev._id }} mode="explorer" onSInscrire={() => sInscrire(ev._id)} />
+                                        </div>
+                                    ))}
+                                </div>
+                                <hr style={{ border: 'none', borderTop: '1px solid #2a2a4a', margin: '20px 0' }} />
+                            </div>
+                        )}
+                        {evenementsDispos.length === 0 ? (
+                            <div className="dash-empty">
+                                <p className="dash-empty__icon">📅</p>
+                                <p className="dash-empty__text">Aucun événement disponible.</p>
+                            </div>
+                        ) : (
+                            <div className="dash-events-grid">
+                                {evenementsDispos.map(ev => (
+                                    <EventCard key={ev._id} event={{ ...ev, id: ev._id }} mode="explorer"
+                                        onSInscrire={() => sInscrire(ev._id)} />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ── MES INSCRIPTIONS ── */}
+                {activeTab === 'mes-inscriptions' && (
+                    mesInscriptions.length === 0 ? (
+                        <div className="dash-empty">
+                            <p className="dash-empty__icon">🏃</p>
+                            <p className="dash-empty__text">Vous n'êtes inscrit à aucun événement.</p>
+                            <button className="dash-btn-primary" onClick={() => setActiveTab('explorer')}>Explorer →</button>
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            {mesInscriptions.map(ins => (
+                                <div key={ins.id} style={{ background: '#12122a', border: '1px solid #2a2a4a', borderRadius: 14, padding: '1rem 1.25rem' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: 15, fontWeight: 600, color: '#e8e8f0', marginBottom: 4 }}>{ins.titre}</div>
+                                            <div style={{ fontSize: 12, color: '#8888aa' }}>
+                                                📅 {ins.date ? new Date(ins.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Date N/A'} · 📍 {ins.lieu || 'N/A'}
+                                                {ins.is_present && <span style={{ marginLeft: 8, color: '#10b981', fontWeight: 600 }}>✅ Présent</span>}
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                            <button className="dash-btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: ins.qr_utilise ? '#10b981' : undefined }}
+                                                onClick={() => setQrModal({ eventId: ins.eventId, token: ins.qr_token, titre: ins.titre, qr_utilise: ins.qr_utilise })}>
+                                                {ins.qr_utilise ? '✅ QR scanné' : '📱 QR'}
+                                            </button>
+                                            <button onClick={() => annulerInscription(ins.eventId)}
+                                                style={{ fontSize: 12, padding: '5px 10px', background: 'rgba(255,77,109,.1)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                                                Annuler
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )
+                )}
+
+                {/* ── RÉCOMPENSES ── */}
+                {activeTab === 'recompenses' && (
+                    mesRecompenses.length === 0 ? (
+                        <div className="dash-empty">
+                            <p className="dash-empty__icon">🎫</p>
+                            <p className="dash-empty__text">Participez à des événements pour gagner des coupons !</p>
+                        </div>
+                    ) : (
+                        <div className="dash-rewards-grid">
+                            {mesRecompenses.map(r => <RewardCard key={r.id} recompense={r} />)}
+                        </div>
+                    )
+                )}
+
                 {/* ── PROFIL ── */}
                 {activeTab === 'profil' && (
                     <div>
@@ -555,6 +962,7 @@ const DashboardOrganisateur = () => {
                 )}
 
             </main>
+            {qrModal && <QRModal token={qrModal.token} titre={qrModal.titre} qr_utilise={qrModal.qr_utilise} onClose={() => setQrModal(null)} />}
         </div>
     );
 };

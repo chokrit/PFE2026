@@ -37,6 +37,23 @@ const participationSchema = new mongoose.Schema({
     registered_at: {
         type: Date,
         default: Date.now
+    },
+
+    // ── QR code personnel du participant ──────────────────────
+    // Généré automatiquement à l'inscription (crypto.randomBytes)
+    // Affiché comme QR code dans le dashboard du participant
+    // L'organisateur le scanne pour valider la présence sur place
+    qr_token: {
+        type: String,
+        unique: true,
+        sparse: true,   // autorise null : les anciennes participations sans token ne bloquent pas
+    },
+
+    // Passe à true dès que l'organisateur a scanné ce token
+    // Empêche le double-scan d'un même QR (une présence = un scan)
+    qr_utilise: {
+        type: Boolean,
+        default: false,
     }
 
 }, {

@@ -33,7 +33,7 @@ export const RewardCard = ({ recompense, onUtiliser }) => {
   );
 };
 
-export const QRModal = ({ token, titre, onClose }) => {
+export const QRModal = ({ token, titre, qr_utilise, onClose }) => {
   return (
     <div className="dash-overlay" onClick={onClose}>
       <div className="dash-modal qr-modal" onClick={e => e.stopPropagation()}>
@@ -43,7 +43,17 @@ export const QRModal = ({ token, titre, onClose }) => {
         </div>
         <div className="qr-modal__body">
           <p className="qr-modal__event-name">{titre}</p>
-          <div className="qr-modal__qr-zone">
+          {qr_utilise && (
+            <div style={{ background: 'rgba(16,185,129,.15)', border: '1px solid #10b981', borderRadius: 8, padding: '8px 14px', marginBottom: 12, textAlign: 'center', color: '#10b981', fontSize: 13, fontWeight: 600 }}>
+              ✅ Présence validée — ce QR a déjà été scanné
+            </div>
+          )}
+          {!token && (
+            <div style={{ color: '#888', textAlign: 'center', padding: 16, fontSize: 13 }}>
+              Token non disponible pour cette inscription
+            </div>
+          )}
+          <div className="qr-modal__qr-zone" style={{ opacity: qr_utilise ? 0.4 : 1 }}>
             {/*
               TODO: Remplacer par le vrai QR code :
               import { QRCodeSVG } from 'qrcode.react';

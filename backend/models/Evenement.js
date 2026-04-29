@@ -79,7 +79,13 @@ const evenementSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Categorie'
         // Tags de catégories (ex: Football, Natation)
-    }]
+    }],
+
+    notif_rappel_envoyee: {
+        type: Boolean,
+        default: false,
+        // true dès que le cron a envoyé le rappel aux participants
+    }
 
 }, {
     collection: 'evenements',

@@ -12,6 +12,10 @@
 
 const Evenement = require('../models/Evenement');
 const Participation = require('../models/Participation');
+const Utilisateur = require('../models/Utilisateur');
+const Interest = require('../models/Interest');
+const Review = require('../models/Review');
+const Connexion = require('../models/Connexion');
 const crypto = require('crypto');
 
 // ── Formater un événement pour le frontend ──────────────────
@@ -236,7 +240,7 @@ const qrScan = async (req, res) => {
     const { qr_code_token } = req.body;
     if (!qr_code_token) return res.status(400).json({ success: false, message: 'Token QR manquant' });
 
-    const ev = await Evenement.findOne({ qr_code_token });
+    const ev = await Evenement.findOne({ qr_code_token }).populate('categories', '_id');
     if (!ev) return res.status(404).json({ success: false, message: 'QR Code invalide' });
 
     const p = await Participation.findOneAndUpdate(
@@ -246,8 +250,144 @@ const qrScan = async (req, res) => {
     );
     if (!p) return res.status(404).json({ success: false, message: 'Vous n\'êtes pas inscrit à cet événement' });
 
+    // ── Mise à jour des statistiques du participant ──
+    try {
+      const heures = ev.ev_end_time && ev.ev_start_time
+        ? (new Date(ev.ev_end_time) - new Date(ev.ev_start_time)) / (1000 * 60 * 60)
+        : 1;
+
+      // Calculer score fiabilité
+      const totalInscriptions = await Participation.countDocuments({ utilisateur: req.utilisateur._id });
+      const totalPresences = await Participation.countDocuments({ utilisateur: req.utilisateur._id, is_present: true });
+      const reliabilite = totalInscriptions > 0 ? Math.round((totalPresences / totalInscriptions) * 100) : 100;
+
+      await Utilisateur.findByIdAndUpdate(req.utilisateur._id, {
+        $inc: { cumul_heures_participation: Math.round(heures * 10) / 10, cumul_points: 10 },
+        reliabilite_score: reliabilite,
+      });
+
+      // Mettre à jour ou créer l'interest pour chaque catégorie de l'événement
+      for (const cat of (ev.categories || [])) {
+        await Interest.findOneAndUpdate(
+          { utilisateur: req.utilisateur._id, categorie: cat._id },
+          { $inc: { nb_participations: 1 } },
+          { upsert: true, new: true }
+        );
+      }
+    } catch (statErr) {
+      console.warn('⚠️ Stats qrScan partielles:', statErr.message);
+    }
+
     return res.json({ success: true, message: '✅ Présence confirmée !', participation: p, evenement: { title_event: ev.title_event } });
   } catch (error) {
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/evenements/suggestions — Événements recommandés
+// Score pondéré par catégorie, connexions, note, fiabilité orga
+// ─────────────────────────────────────────────────────────────
+const getSuggestions = async (req, res) => {
+  try {
+    const moi = req.utilisateur._id;
+    const maintenant = new Date();
+
+    const evs = await Evenement.find({ stat_event: 'publié', ev_start_time: { $gt: maintenant } })
+      .populate('categories', '_id')
+      .populate('createur', 'reliabilite_score')
+      .limit(50);
+
+    // Mes intérêts avec nb_participations
+    const mesInterests = await Interest.find({ utilisateur: moi });
+    const interestMap = {};
+    mesInterests.forEach(i => { interestMap[i.categorie.toString()] = i.nb_participations; });
+
+    // Mes connexions acceptées
+    const mesConnexions = await Connexion.find({
+      $or: [{ demandeur: moi }, { receveur: moi }],
+      type: 'partenaire', statut: 'accepte',
+    });
+    const idConnexions = mesConnexions.map(c =>
+      c.demandeur.toString() === moi.toString() ? c.receveur.toString() : c.demandeur.toString()
+    );
+
+    const scores = await Promise.all(evs.map(async (ev) => {
+      // Score catégorie (35%)
+      const maxPart = Math.max(...(ev.categories || []).map(c => interestMap[c._id.toString()] || 0), 0);
+      const scoreCat = Math.min(maxPart / 10, 1) * 0.35;
+
+      // Score connexions inscrites (30%)
+      const nb_inscrits = await Participation.countDocuments({ evenement: ev._id });
+      const inscrisConnectes = nb_inscrits > 0
+        ? await Participation.countDocuments({ evenement: ev._id, utilisateur: { $in: idConnexions } })
+        : 0;
+      const scoreCx = Math.min(inscrisConnectes / 3, 1) * 0.30;
+
+      // Score note moyenne événement (20%) — via Review si disponible
+      let scoreNote = 0.10; // neutre par défaut
+
+      // Score fiabilité organisateur (15%)
+      const fiab = ev.createur?.reliabilite_score ?? 80;
+      const scoreOrga = (fiab / 100) * 0.15;
+
+      return { ev, score: scoreCat + scoreCx + scoreNote + scoreOrga };
+    }));
+
+    const top5 = scores.sort((a, b) => b.score - a.score).slice(0, 5);
+    const resultats = await Promise.all(top5.map(async ({ ev, score }) => ({
+      ...(await formater(ev)),
+      score,
+    })));
+
+    return res.json({ success: true, suggestions: resultats });
+  } catch (error) {
+    console.error('getSuggestions:', error.message);
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/evenements/:id/noter
+// Body: { note (1-5), commentaire }
+// ─────────────────────────────────────────────────────────────
+const noterEvenement = async (req, res) => {
+  try {
+    const { note, commentaire } = req.body;
+    if (!note || note < 1 || note > 5) {
+      return res.status(400).json({ success: false, message: 'Note entre 1 et 5' });
+    }
+
+    const participation = await Participation.findOne({
+      utilisateur: req.utilisateur._id, evenement: req.params.id, is_present: true,
+    });
+    if (!participation) {
+      return res.status(403).json({ success: false, message: 'Vous devez avoir participé à cet événement' });
+    }
+
+    const ev = await Evenement.findById(req.params.id).populate('categories', '_id');
+    if (!ev) return res.status(404).json({ success: false, message: 'Événement introuvable' });
+
+    // Mettre à jour interest.note pour chaque catégorie
+    for (const cat of (ev.categories || [])) {
+      await Interest.findOneAndUpdate(
+        { utilisateur: req.utilisateur._id, categorie: cat._id },
+        { note },
+        { upsert: true }
+      );
+    }
+
+    // Créer le Review
+    await Review.create({
+      utilisateur: req.utilisateur._id,
+      evenement: req.params.id,
+      note,
+      commentaire: commentaire?.trim() || '',
+    });
+
+    return res.json({ success: true, message: 'Note enregistrée' });
+  } catch (error) {
+    console.error('noterEvenement:', error.message);
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
@@ -255,5 +395,5 @@ const qrScan = async (req, res) => {
 module.exports = {
   getEvenements, getTousEvenements, getMesEvenements,
   getEvenement, creerEvenement, modifierEvenement,
-  supprimerEvenement, qrScan,
+  supprimerEvenement, qrScan, getSuggestions, noterEvenement,
 };

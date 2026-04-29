@@ -11,6 +11,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
+const { demarrerCron } = require('./cron/rappelEvenements');
 
 const app = express();
 
@@ -40,6 +41,10 @@ app.use('/api/participations', require('./routes/participations'));  // ← NOUV
 app.use('/api/recompenses', require('./routes/recompenses'));     // ← NOUVEAU
 app.use('/api/locations', require('./routes/locations'));       // ← NOUVEAU
 app.use('/api/categories', require('./routes/categories'));      // ← NOUVEAU
+app.use('/api/medias', require('./routes/medias'));
+app.use('/api/connexions', require('./routes/connexions'));
+app.use('/api/equipes', require('./routes/equipes'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 // ── 404 ──
 app.use((req, res) => {
@@ -65,4 +70,5 @@ app.listen(PORT, () => {
   console.log(`📡 Port : ${PORT}`);
   console.log(`🌍 Env  : ${process.env.NODE_ENV}`);
   console.log(`🔗 URL  : http://localhost:${PORT}/api/health\n`);
+  demarrerCron();
 });

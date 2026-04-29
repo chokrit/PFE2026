@@ -17,9 +17,22 @@ const interestSchema = new mongoose.Schema({
     categorie: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Categorie',
-        required: true
-        // La catégorie sportive qui intéresse l'utilisateur
-    }
+        required: true,
+    },
+
+    nb_participations: {
+        type: Number,
+        default: 0,
+        // Incrémenté à chaque présence confirmée dans cette catégorie
+    },
+
+    note: {
+        type: Number,
+        default: null,
+        min: 1,
+        max: 5,
+        // Dernière note donnée à un événement de cette catégorie
+    },
 
 }, {
     collection: 'interests'

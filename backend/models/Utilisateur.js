@@ -81,7 +81,37 @@ const utilisateurSchema = new mongoose.Schema({
     photo: {
         type: String,
         default: ''
-        // URL ou base64 de la photo de profil
+    },
+
+    // ── Profil social ──
+    visibilite_profil: {
+        type: String,
+        enum: ['public', 'prive', 'masque'],
+        default: 'public',
+        // public  → visible par tous les participants
+        // prive   → visible par ses connexions seulement
+        // masque  → invisible dans toutes les listes
+    },
+
+    bio_sportive: {
+        type: String,
+        trim: true,
+    },
+
+    sports_preferes: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Categorie',
+    }],
+
+    disponibilites: [{
+        type: String,
+        enum: ['weekend', 'soir_semaine', 'matin', 'apres_midi'],
+    }],
+
+    score_social: {
+        type: Number,
+        default: 0,
+        // likes reçus + partenariats acceptés + notes collaboration
     },
 
     // ── Préférences ──

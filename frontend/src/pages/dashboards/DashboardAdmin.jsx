@@ -15,7 +15,11 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useLanguage } from '../../context/LanguageContext';
 import api from '../../api';
 import StatCard from '../../components/dashboard/StatCard';
+import EventCard from '../../components/dashboard/EventCard';
+import RewardCard from '../../components/dashboard/RewardCard';
+import QRModal from '../../components/dashboard/QRModal';
 import MonEspaceModal from '../../components/dashboard/MonEspaceModal';
+import NotificationBell from '../../components/dashboard/NotificationBell';
 import '../../styles/dashboard/dashboard.css';
 import '../../styles/dashboard/admin.css';
 
@@ -34,6 +38,7 @@ const DashboardAdmin = () => {
   const [categories, setCategories] = useState([]);
   const [kpis, setKpis] = useState({ totalUsers: 0, activeEvents: 0, totalParticipations: 0, avgReliability: 0 });
 
+  const [medias, setMedias] = useState([]);
   const [modalEvent, setModalEvent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newEvent, setNewEvent] = useState({
@@ -45,6 +50,13 @@ const DashboardAdmin = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [filtreStatut, setFiltreStatut] = useState('tous');
   const [showMonEspace, setShowMonEspace] = useState(false);
+
+  // ── Participation aux événements (comme un utilisateur) ─
+  const [mesInscriptions, setMesInscriptions] = useState([]);
+  const [evenementsDispos, setEvenementsDispos] = useState([]);
+  const [mesRecompenses, setMesRecompenses]     = useState([]);
+  const [suggestions, setSuggestions]           = useState([]);
+  const [qrModal, setQrModal]                   = useState(null);
 
   useEffect(() => {
     const token = localStorage.getItem('event_token');
@@ -61,12 +73,17 @@ const DashboardAdmin = () => {
   const charger = async () => {
     setLoading(true);
     try {
-      const [usersR, evsR, locsR, catsR] = await Promise.allSettled([
+      const [usersR, evsR, locsR, catsR, mediasR, inscR, dispoR, suggR] = await Promise.allSettled([
         api.get('/utilisateurs'),
         api.get('/evenements/all'),
         api.get('/locations'),
         api.get('/categories'),
+        api.get('/medias/moderation'),
+        api.get('/participations/mes-inscriptions'),
+        api.get('/evenements'),
+        api.get('/evenements/suggestions'),
       ]);
+      if (mediasR.status === 'fulfilled') setMedias(mediasR.value?.data?.medias || []);
       if (usersR.status === 'fulfilled') {
         const users = usersR.value.data.utilisateurs || [];
         setUtilisateurs(users);
@@ -86,6 +103,13 @@ const DashboardAdmin = () => {
       }
       if (locsR.status === 'fulfilled') setLocations(locsR.value.data.locations || []);
       if (catsR.status === 'fulfilled') setCategories(catsR.value.data.categories || []);
+      if (inscR.status === 'fulfilled')  setMesInscriptions(inscR.value.data.participations || []);
+      if (dispoR.status === 'fulfilled') setEvenementsDispos(dispoR.value.data.evenements || []);
+      if (suggR.status === 'fulfilled')  setSuggestions(suggR.value.data.suggestions || []);
+      try {
+        const rew = await api.get('/recompenses/mes-coupons');
+        setMesRecompenses(rew.data.coupons || []);
+      } catch { setMesRecompenses([]); }
     } finally { setLoading(false); }
   };
 
@@ -150,7 +174,48 @@ const DashboardAdmin = () => {
     } catch { flash('error', 'Erreur suppression'); }
   };
 
-  const usersFiltres = utilisateurs.filter(u => `${u.first_name} ${u.last_name} ${u.email}`.toLowerCase().includes(userSearch.toLowerCase()));
+  const validerMedia = async (mediaId, statut) => {
+    try {
+      await api.put(`/medias/${mediaId}/valider`, { statut });
+      setMedias(p => p.filter(m => m._id !== mediaId));
+      flash('success', statut === 'approuve' ? 'Média approuvé' : 'Média refusé');
+    } catch { flash('error', 'Erreur modération'); }
+  };
+
+  const sInscrire = async (eventId) => {
+    try {
+      await api.post(`/participations/${eventId}/inscription`);
+      flash('success', 'Inscription confirmée !');
+      charger();
+      setActiveTab('mes-inscriptions');
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur inscription');
+    }
+  };
+
+  const annulerInscription = async (eventId) => {
+    if (!window.confirm('Annuler votre inscription ?')) return;
+    try {
+      await api.delete(`/participations/${eventId}/annuler`);
+      flash('success', 'Inscription annulée');
+      charger();
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur annulation');
+    }
+  };
+
+  const supprimerMedia = async (mediaId) => {
+    try {
+      await api.delete(`/medias/${mediaId}`);
+      setMedias(p => p.filter(m => m._id !== mediaId));
+      flash('success', 'Média supprimé');
+    } catch { flash('error', 'Erreur suppression'); }
+  };
+
+  const usersFiltres = utilisateurs.filter(u => {
+    const q = userSearch.toLowerCase();
+    return !q || `${u.first_name} ${u.last_name} ${u.email} ${u.telephone || ''} ${u.role}`.toLowerCase().includes(q);
+  });
   const evsFiltres = filtreStatut === 'tous' ? evenements : evenements.filter(e => e.stat_event === filtreStatut);
 
   // Événements soumis par des users qui attendent validation
@@ -219,6 +284,7 @@ const DashboardAdmin = () => {
             </div>
             <span className="dash-username">{adminUser?.first_name} {adminUser?.last_name}</span>
           </div>
+          <NotificationBell />
           <button
             className="dash-btn-ghost"
             onClick={() => setShowMonEspace(true)}
@@ -236,9 +302,13 @@ const DashboardAdmin = () => {
         {/* Nav */}
         <nav className="admin-nav">
           {[
-            { key: 'overview', label: 'Vue globale', icon: '📊' },
-            { key: 'users', label: 'Utilisateurs', icon: '👥' },
-            { key: 'events', label: 'Événements', icon: '🏟' },
+            { key: 'overview',          label: 'Vue globale',      icon: '📊' },
+            { key: 'users',             label: 'Utilisateurs',     icon: '👥' },
+            { key: 'events',            label: 'Événements',       icon: '🏟' },
+            { key: 'medias',            label: 'Médias',           icon: '🖼' },
+            { key: 'explorer',          label: 'Explorer',         icon: '🔍' },
+            { key: 'mes-inscriptions',  label: 'Mes inscriptions', icon: '🎟' },
+            { key: 'recompenses',       label: 'Récompenses',      icon: '🎫' },
           ].map(t => (
             <button key={t.key} className={`admin-nav-btn ${activeTab === t.key ? 'active' : ''}`} onClick={() => setActiveTab(t.key)}>
               <span className="admin-nav-icon">{t.icon}</span>
@@ -252,6 +322,19 @@ const DashboardAdmin = () => {
                   </span>
                 )}
               </>}
+              {t.key === 'medias' && medias.length > 0 && (
+                <span style={{ background: '#f59e0b', color: '#000', borderRadius: '999px', fontSize: '10px', fontWeight: 700, padding: '1px 6px' }}>
+                  {medias.length}
+                </span>
+              )}
+              {t.key === 'mes-inscriptions' && mesInscriptions.length > 0 && (
+                <span className="dash-tab-badge">{mesInscriptions.length}</span>
+              )}
+              {t.key === 'recompenses' && mesRecompenses.filter(r => !r.is_redeemed).length > 0 && (
+                <span style={{ background: '#ff6b00', color: '#fff', borderRadius: '999px', fontSize: '10px', fontWeight: 700, padding: '1px 6px' }}>
+                  {mesRecompenses.filter(r => !r.is_redeemed).length}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -479,10 +562,20 @@ const DashboardAdmin = () => {
                       <div className="form-group">
                         <label>Date début *</label>
                         <input type="datetime-local" value={newEvent.ev_start_time}
-                          onChange={e => setNewEvent({ ...newEvent, ev_start_time: e.target.value })} required />
+                          onChange={e => {
+                            const start = e.target.value;
+                            let autoFin = '';
+                            if (start) {
+                              const d = new Date(start);
+                              d.setHours(d.getHours() + 1);
+                              const p = n => String(n).padStart(2, '0');
+                              autoFin = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+                            }
+                            setNewEvent({ ...newEvent, ev_start_time: start, ev_end_time: autoFin });
+                          }} required />
                       </div>
                       <div className="form-group">
-                        <label>Date fin</label>
+                        <label>Date fin <span style={{ fontSize: 10, color: '#666' }}>(auto +1h)</span></label>
                         <input type="datetime-local" value={newEvent.ev_end_time}
                           onChange={e => setNewEvent({ ...newEvent, ev_end_time: e.target.value })} />
                       </div>
@@ -534,7 +627,183 @@ const DashboardAdmin = () => {
           </div>
         )}
 
+        {/* ══ MÉDIAS ══ */}
+        {activeTab === 'medias' && (
+          <div>
+            <h2 className="dash-section-title">Modération des médias</h2>
+
+            {medias.length === 0 ? (
+              <div className="dash-empty">
+                <p className="dash-empty__icon">🖼</p>
+                <p className="dash-empty__text">Aucun média en attente de modération.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {medias.map(m => (
+                  <div key={m._id} style={{
+                    background: '#12122a',
+                    border: `1px solid ${m.signale ? 'rgba(255,77,109,.4)' : '#2a2a4a'}`,
+                    borderRadius: '12px',
+                    padding: '14px 16px',
+                    display: 'flex',
+                    gap: '14px',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                  }}>
+                    {/* Miniature */}
+                    <div style={{ flexShrink: 0 }}>
+                      <img
+                        src={m.thumbnail_url || m.file_url}
+                        alt=""
+                        style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, display: 'block' }}
+                      />
+                    </div>
+
+                    {/* Infos */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: 4 }}>
+                        <span style={{
+                          fontSize: 11, padding: '2px 8px', borderRadius: 99, fontWeight: 600,
+                          background: m.type_media === 'photo_profil' ? 'rgba(0,212,255,.15)' : 'rgba(255,107,0,.15)',
+                          color: m.type_media === 'photo_profil' ? '#00d4ff' : '#ff6b00',
+                        }}>
+                          {m.type_media === 'photo_profil' ? 'Photo profil' : m.type_media === 'photo_officielle' ? 'Officielle' : 'Événement'}
+                        </span>
+                        {m.signale && (
+                          <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: 'rgba(255,77,109,.2)', color: '#ff4d6d', fontWeight: 600 }}>
+                            ⚠ Signalé
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: '#888' }}>
+                          {m.statut === 'en_attente' ? '⏳ En attente' : m.statut === 'approuve' ? '✓ Approuvé' : '✕ Refusé'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 13, color: '#e8e8f0', marginBottom: 2 }}>
+                        {m.utilisateur?.first_name} {m.utilisateur?.last_name}
+                      </div>
+                      {m.evenement && (
+                        <div style={{ fontSize: 12, color: '#8888aa' }}>📍 {m.evenement.title_event}</div>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                      <a href={m.file_url} target="_blank" rel="noreferrer"
+                        style={{ fontSize: 12, padding: '6px 12px', background: '#1e1e3a', color: '#aaa', border: '1px solid #333', borderRadius: 6, textDecoration: 'none' }}>
+                        Voir
+                      </a>
+                      {m.statut !== 'approuve' && (
+                        <button onClick={() => validerMedia(m._id, 'approuve')}
+                          style={{ fontSize: 12, padding: '6px 12px', background: 'rgba(0,230,118,.15)', color: '#00e676', border: '1px solid rgba(0,230,118,.3)', borderRadius: 6, cursor: 'pointer' }}>
+                          ✓ Approuver
+                        </button>
+                      )}
+                      {m.statut !== 'refuse' && (
+                        <button onClick={() => validerMedia(m._id, 'refuse')}
+                          style={{ fontSize: 12, padding: '6px 12px', background: 'rgba(255,107,0,.15)', color: '#ff6b00', border: '1px solid rgba(255,107,0,.3)', borderRadius: 6, cursor: 'pointer' }}>
+                          ✕ Refuser
+                        </button>
+                      )}
+                      <button onClick={() => supprimerMedia(m._id)}
+                        style={{ fontSize: 12, padding: '6px 12px', background: 'rgba(255,77,109,.15)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer' }}>
+                        🗑
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══ EXPLORER ══ */}
+        {activeTab === 'explorer' && (
+          <div>
+            {suggestions.length > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 600, color: '#a78bfa', marginBottom: 12 }}>✨ Recommandé pour vous</h3>
+                <div className="dash-events-grid">
+                  {suggestions.slice(0, 4).map(ev => (
+                    <div key={ev._id} style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', top: 8, right: 8, background: '#a78bfa22', color: '#a78bfa', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600, zIndex: 1 }}>
+                        {Math.round((ev.score || 0) * 100)}% match
+                      </span>
+                      <EventCard event={{ ...ev, id: ev._id }} mode="explorer" onSInscrire={() => sInscrire(ev._id)} />
+                    </div>
+                  ))}
+                </div>
+                <hr style={{ border: 'none', borderTop: '1px solid #2a2a4a', margin: '20px 0' }} />
+              </div>
+            )}
+            {evenementsDispos.length === 0 ? (
+              <div className="dash-empty">
+                <p className="dash-empty__icon">📅</p>
+                <p className="dash-empty__text">Aucun événement disponible.</p>
+              </div>
+            ) : (
+              <div className="dash-events-grid">
+                {evenementsDispos.map(ev => (
+                  <EventCard key={ev._id} event={{ ...ev, id: ev._id }} mode="explorer"
+                    onSInscrire={() => sInscrire(ev._id)} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══ MES INSCRIPTIONS ══ */}
+        {activeTab === 'mes-inscriptions' && (
+          mesInscriptions.length === 0 ? (
+            <div className="dash-empty">
+              <p className="dash-empty__icon">🏃</p>
+              <p className="dash-empty__text">Vous n'êtes inscrit à aucun événement.</p>
+              <button className="dash-btn-primary" onClick={() => setActiveTab('explorer')}>Explorer →</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {mesInscriptions.map(ins => (
+                <div key={ins.id} style={{ background: '#12122a', border: '1px solid #2a2a4a', borderRadius: 14, padding: '1rem 1.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: '#e8e8f0', marginBottom: 4 }}>{ins.titre}</div>
+                      <div style={{ fontSize: 12, color: '#8888aa' }}>
+                        📅 {ins.date ? new Date(ins.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Date N/A'} · 📍 {ins.lieu || 'N/A'}
+                        {ins.is_present && <span style={{ marginLeft: 8, color: '#10b981', fontWeight: 600 }}>✅ Présent</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button className="dash-btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: ins.qr_utilise ? '#10b981' : undefined }}
+                        onClick={() => setQrModal({ eventId: ins.eventId, token: ins.qr_token, titre: ins.titre, qr_utilise: ins.qr_utilise })}>
+                        {ins.qr_utilise ? '✅ QR scanné' : '📱 QR'}
+                      </button>
+                      <button onClick={() => annulerInscription(ins.eventId)}
+                        style={{ fontSize: 12, padding: '5px 10px', background: 'rgba(255,77,109,.1)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                        Annuler
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {/* ══ RÉCOMPENSES ══ */}
+        {activeTab === 'recompenses' && (
+          mesRecompenses.length === 0 ? (
+            <div className="dash-empty">
+              <p className="dash-empty__icon">🎫</p>
+              <p className="dash-empty__text">Participez à des événements pour gagner des coupons !</p>
+            </div>
+          ) : (
+            <div className="dash-rewards-grid">
+              {mesRecompenses.map(r => <RewardCard key={r.id} recompense={r} />)}
+            </div>
+          )
+        )}
+
       </main>
+      {qrModal && <QRModal token={qrModal.token} titre={qrModal.titre} qr_utilise={qrModal.qr_utilise} onClose={() => setQrModal(null)} />}
     </div>
   );
 };

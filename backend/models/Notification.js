@@ -16,12 +16,28 @@ const notificationSchema = new mongoose.Schema({
 
     type: {
         type: String,
-        // rappel_event        → cron 2h avant l'événement
-        // inscription         → confirmation d'inscription
-        // validation          → présence confirmée par l'organisateur
-        // systeme             → messages internes de la plateforme
-        // encouragement_absent→ message chaleureux aux absents après la fin
-        enum: ['rappel_event', 'inscription', 'validation', 'systeme', 'encouragement_absent'],
+        // rappel_event           → cron 2h avant l'événement
+        // inscription            → confirmation d'inscription
+        // validation             → présence confirmée par l'organisateur
+        // systeme                → messages internes de la plateforme
+        // encouragement_absent   → message chaleureux aux absents après la fin
+        // modification_soumise   → orga/admin : un user a soumis une modification
+        // modification_approuvee → créateur + participants : modification acceptée
+        // modification_refusee   → créateur : modification refusée avec raison
+        // evenement_annule       → tous les participants : annulation + excuse
+        // evenement_termine      → participants : événement terminé (informatif)
+        enum: [
+            'rappel_event',
+            'inscription',
+            'validation',
+            'systeme',
+            'encouragement_absent',
+            'modification_soumise',
+            'modification_approuvee',
+            'modification_refusee',
+            'evenement_annule',
+            'evenement_termine',
+        ],
         default: 'rappel_event',
     },
 

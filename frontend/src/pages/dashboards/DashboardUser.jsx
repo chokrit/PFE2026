@@ -24,6 +24,17 @@ import PhotoGallery from '../../components/PhotoGallery';
 import NotificationBell from '../../components/dashboard/NotificationBell';
 import '../../styles/dashboard/dashboard.css';
 
+// Calcule les valeurs par défaut pour les champs date/heure :
+//   start = maintenant + 2h (arrondi à la minute)
+//   end   = start + 1h
+const mkDates = () => {
+  const p = n => String(n).padStart(2, '0');
+  const fmt = d => `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  const dS = new Date(); dS.setHours(dS.getHours() + 2, 0, 0, 0);
+  const dE = new Date(dS); dE.setHours(dE.getHours() + 1);
+  return { start: fmt(dS), end: fmt(dE) };
+};
+
 const DashboardUser = () => {
   const navigate = useNavigate();
   const { isRTL } = useLanguage();
@@ -57,10 +68,29 @@ const DashboardUser = () => {
   const [showMonEspace, setShowMonEspace] = useState(false);
   const [modalCreer, setModalCreer] = useState(false);
   const [savingEvent, setSavingEvent] = useState(false);
-  const [form, setForm] = useState({
-    title_event: '', event_description: '', ev_start_time: '',
-    ev_end_time: '', max_participants: 10, location: '', categories: [],
+  const [form, setForm] = useState(() => {
+    const { start, end } = mkDates();
+    return { title_event: '', event_description: '', ev_start_time: start, ev_end_time: end, max_participants: 10, location: '', categories: [] };
   });
+
+  // ── Suggestion inline catégorie / lieu ──────────────────
+  const [showSuggCat, setShowSuggCat]       = useState(false);
+  const [suggCatForm, setSuggCatForm]       = useState({ event_categ: '', event_type: '' });
+  const [savingSuggCat, setSavingSuggCat]   = useState(false);
+  const [showSuggLieu, setShowSuggLieu]     = useState(false);
+  const [suggLieuNom, setSuggLieuNom]       = useState('');
+  const [suggLieuCap, setSuggLieuCap]       = useState('');
+  const [savingSuggLieu, setSavingSuggLieu] = useState(false);
+
+  // ── Cycle de vie : modification et annulation ────────────
+  // modalModifier : contient l'événement à modifier (ou null)
+  const [modalModifier, setModalModifier]       = useState(null);
+  const [formModif, setFormModif]               = useState({});
+  const [savingModif, setSavingModif]           = useState(false);
+  // modalAnnuler : contient l'événement à annuler (ou null)
+  const [modalAnnuler, setModalAnnuler]         = useState(null);
+  const [raisonAnnulation, setRaisonAnnulation] = useState('');
+  const [savingAnnulation, setSavingAnnulation] = useState(false);
 
   // ── Session ──────────────────────────────────────────────
   useEffect(() => {
@@ -153,6 +183,45 @@ const DashboardUser = () => {
     }
   };
 
+  // ── Suggérer une catégorie depuis le formulaire ──────────
+  const soumettreSuggCat = async () => {
+    if (!suggCatForm.event_categ.trim() || !suggCatForm.event_type.trim()) {
+      flash('error', 'Groupe et sport sont obligatoires');
+      return;
+    }
+    setSavingSuggCat(true);
+    try {
+      const res = await api.post('/categories/suggerer', suggCatForm);
+      flash('success', res.data.message);
+      setSuggCatForm({ event_categ: '', event_type: '' });
+      setShowSuggCat(false);
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur suggestion');
+    } finally {
+      setSavingSuggCat(false);
+    }
+  };
+
+  // ── Suggérer un lieu depuis le formulaire ────────────────
+  const soumettreSuggLieu = async () => {
+    if (!suggLieuNom.trim()) { flash('error', 'Le nom du lieu est obligatoire'); return; }
+    setSavingSuggLieu(true);
+    try {
+      const res = await api.post('/locations/suggerer', {
+        name_location: suggLieuNom.trim(),
+        location_capacity: suggLieuCap ? Number(suggLieuCap) : 0,
+      });
+      flash('success', res.data.message);
+      setSuggLieuNom('');
+      setSuggLieuCap('');
+      setShowSuggLieu(false);
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur suggestion');
+    } finally {
+      setSavingSuggLieu(false);
+    }
+  };
+
   // ── Soumettre un événement ────────────────────────────────
   const soumettreEvent = async (e) => {
     e.preventDefault();
@@ -175,13 +244,85 @@ const DashboardUser = () => {
       const res = await api.post('/evenements', payload);
       flash('success', res.data.message);
       setModalCreer(false);
-      setForm({ title_event: '', event_description: '', ev_start_time: '', ev_end_time: '', max_participants: 20, location: '', categories: [] });
+      const { start, end } = mkDates();
+      setForm({ title_event: '', event_description: '', ev_start_time: start, ev_end_time: end, max_participants: 20, location: '', categories: [] });
       charger();
       setActiveTab('creations');
     } catch (err) {
       flash('error', err.response?.data?.message || 'Erreur création');
     } finally {
       setSavingEvent(false);
+    }
+  };
+
+  // ── Ouvrir le modal de modification pré-rempli ───────────
+  const ouvrirModification = (ev) => {
+    const p = n => String(n).padStart(2, '0');
+    const fmt = (d) => {
+      if (!d) return '';
+      const dt = new Date(d);
+      return `${dt.getFullYear()}-${p(dt.getMonth()+1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`;
+    };
+    setFormModif({
+      title_event:      ev.title_event || '',
+      event_description: ev.event_description || '',
+      ev_start_time:    fmt(ev.ev_start_time),
+      ev_end_time:      fmt(ev.ev_end_time),
+      max_participants: ev.max_participants || 10,
+      location:         ev.location?._id || ev.location || '',
+      categories:       ev.categories?.map(c => c._id || c) || [],
+    });
+    setModalModifier(ev);
+  };
+
+  // ── Soumettre une modification (passe en validation) ─────
+  const soumettreModification = async (e) => {
+    e.preventDefault();
+    if (!formModif.title_event?.trim() || !formModif.ev_start_time) {
+      flash('error', 'Titre et date de début obligatoires');
+      return;
+    }
+    setSavingModif(true);
+    try {
+      const res = await api.put(`/evenements/${modalModifier._id}`, {
+        title_event:       formModif.title_event.trim(),
+        event_description: formModif.event_description?.trim() || '',
+        ev_start_time:     formModif.ev_start_time,
+        ev_end_time:       formModif.ev_end_time || undefined,
+        max_participants:  Number(formModif.max_participants),
+        location:          formModif.location || undefined,
+        categories:        formModif.categories?.length ? formModif.categories : undefined,
+      });
+      flash('success', res.data.message);
+      setModalModifier(null);
+      charger();
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur modification');
+    } finally {
+      setSavingModif(false);
+    }
+  };
+
+  // ── Confirmer l'annulation avec raison obligatoire ───────
+  const confirmerAnnulation = async (e) => {
+    e.preventDefault();
+    if (!raisonAnnulation.trim()) {
+      flash('error', 'La raison d\'annulation est obligatoire');
+      return;
+    }
+    setSavingAnnulation(true);
+    try {
+      const res = await api.post(`/evenements/${modalAnnuler._id}/annuler`, {
+        raison: raisonAnnulation.trim(),
+      });
+      flash('success', res.data.message);
+      setModalAnnuler(null);
+      setRaisonAnnulation('');
+      charger();
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur annulation');
+    } finally {
+      setSavingAnnulation(false);
     }
   };
 
@@ -353,8 +494,35 @@ const DashboardUser = () => {
                     onChange={e => setForm({ ...form, location: e.target.value })}
                     style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
                     <option value="">— Sélectionner —</option>
-                    {locations.map(l => <option key={l._id} value={l._id}>{l.name_location}</option>)}
+                    {locations.map(l => <option key={l._id} value={l._id}>{l.name_location}{l.location_capacity ? ` (${l.location_capacity} pers.)` : ''}</option>)}
                   </select>
+                  {!showSuggLieu ? (
+                    <button type="button" onClick={() => setShowSuggLieu(true)}
+                      style={{ marginTop: 5, fontSize: 11, color: '#8888aa', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'block' }}>
+                      + Mon lieu n'est pas dans la liste ? Suggérer
+                    </button>
+                  ) : (
+                    <div style={{ marginTop: 8, padding: '10px', background: 'rgba(0,212,255,.06)', border: '1px solid rgba(0,212,255,.2)', borderRadius: 8 }}>
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                        <input placeholder="Nom du lieu *" value={suggLieuNom}
+                          onChange={e => setSuggLieuNom(e.target.value)}
+                          style={{ flex: 2, minWidth: 120, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                        <input placeholder="Capacité" type="number" min="0" value={suggLieuCap}
+                          onChange={e => setSuggLieuCap(e.target.value)}
+                          style={{ flex: 1, minWidth: 80, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button type="button" onClick={soumettreSuggLieu} disabled={savingSuggLieu}
+                          style={{ padding: '5px 12px', background: 'rgba(0,212,255,.2)', color: '#00d4ff', border: '1px solid rgba(0,212,255,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                          {savingSuggLieu ? '...' : '📍 Suggérer'}
+                        </button>
+                        <button type="button" onClick={() => { setShowSuggLieu(false); setSuggLieuNom(''); setSuggLieuCap(''); }}
+                          style={{ padding: '5px 10px', background: 'transparent', color: '#8888aa', border: '1px solid #2a2a4a', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                          Annuler
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="form-group">
@@ -367,6 +535,33 @@ const DashboardUser = () => {
                     <option key={c._id} value={c._id}>{c.event_categ} — {c.event_type}</option>
                   ))}
                 </select>
+                {!showSuggCat ? (
+                  <button type="button" onClick={() => setShowSuggCat(true)}
+                    style={{ marginTop: 5, fontSize: 11, color: '#8888aa', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'block' }}>
+                    + Mon sport n'est pas dans la liste ? Suggérer
+                  </button>
+                ) : (
+                  <div style={{ marginTop: 8, padding: '10px', background: 'rgba(167,139,250,.06)', border: '1px solid rgba(167,139,250,.2)', borderRadius: 8 }}>
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                      <input placeholder="Groupe (ex: Aquatique)" value={suggCatForm.event_categ}
+                        onChange={e => setSuggCatForm(p => ({ ...p, event_categ: e.target.value }))}
+                        style={{ flex: 1, minWidth: 120, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                      <input placeholder="Sport (ex: Natation)" value={suggCatForm.event_type}
+                        onChange={e => setSuggCatForm(p => ({ ...p, event_type: e.target.value }))}
+                        style={{ flex: 1, minWidth: 120, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button" onClick={soumettreSuggCat} disabled={savingSuggCat}
+                        style={{ padding: '5px 12px', background: 'rgba(167,139,250,.2)', color: '#a78bfa', border: '1px solid rgba(167,139,250,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                        {savingSuggCat ? '...' : '🏷 Suggérer'}
+                      </button>
+                      <button type="button" onClick={() => { setShowSuggCat(false); setSuggCatForm({ event_categ: '', event_type: '' }); }}
+                        style={{ padding: '5px 10px', background: 'transparent', color: '#8888aa', border: '1px solid #2a2a4a', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                        Annuler
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="dash-modal__footer">
                 <button type="submit" className="dash-btn-primary" disabled={savingEvent}>
@@ -521,10 +716,13 @@ const DashboardUser = () => {
                             ⭐ Noter
                           </button>
                         )}
-                        <button onClick={() => annulerInscription(ins.eventId)}
-                          style={{ fontSize: 12, padding: '5px 10px', background: 'rgba(255,77,109,.1)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
-                          Annuler
-                        </button>
+                        {/* Masquer si événement terminé ou annulé */}
+                        {!['terminé', 'annulé'].includes(ins.stat_event) && (
+                          <button onClick={() => annulerInscription(ins.eventId)}
+                            style={{ fontSize: 12, padding: '5px 10px', background: 'rgba(255,77,109,.1)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                            Annuler
+                          </button>
+                        )}
                       </div>
                     </div>
                     {/* Galerie photos inline */}
@@ -669,35 +867,75 @@ const DashboardUser = () => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {mesCreations.map(ev => {
                       const s = statutStyle(ev.stat_event);
+                      // terminé/annulé → aucune action possible
+                      const peutModifier = !['annulé', 'terminé'].includes(ev.stat_event);
+                      const peutAnnuler  = ev.stat_event === 'publié';
                       return (
                         <div key={ev._id} style={{
                           background: '#12122a', border: '1px solid #2a2a4a', borderRadius: '14px',
-                          padding: '1.25rem', display: 'flex', justifyContent: 'space-between',
-                          alignItems: 'center', gap: '16px', flexWrap: 'wrap',
+                          padding: '1.25rem',
                         }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: '15px', fontWeight: 600, color: '#e8e8f0', marginBottom: '6px' }}>
-                              {ev.title_event}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: '15px', fontWeight: 600, color: '#e8e8f0', marginBottom: '6px' }}>
+                                {ev.title_event}
+                              </div>
+                              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px', color: '#8888aa' }}>
+                                <span>📅 {new Date(ev.ev_start_time).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                                <span>📍 {ev.lieu || 'Lieu non défini'}</span>
+                                <span>👥 {ev.nb_inscrits || 0}/{ev.max_participants} inscrits</span>
+                              </div>
+                              {/* Raison d'annulation affichée directement sous le titre */}
+                              {ev.stat_event === 'annulé' && ev.raison_annulation && (
+                                <div style={{ marginTop: 8, padding: '6px 10px', background: 'rgba(255,77,109,.08)', border: '1px solid rgba(255,77,109,.2)', borderRadius: 6, fontSize: 12, color: '#ff4d6d' }}>
+                                  Raison : {ev.raison_annulation}
+                                </div>
+                              )}
                             </div>
-                            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px', color: '#8888aa' }}>
-                              <span>📅 {new Date(ev.ev_start_time).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
-                              <span>📍 {ev.lieu || 'Lieu non défini'}</span>
-                              <span>👥 {ev.nb_inscrits || 0}/{ev.max_participants} inscrits</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', flexShrink: 0 }}>
+                              {/* Badges statut */}
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                <span style={{ padding: '4px 12px', borderRadius: '999px', fontSize: '11px', fontWeight: 700, background: s.bg, color: s.color }}>
+                                  {s.label}
+                                </span>
+                                {/* Badge jaune si une modification attend validation */}
+                                {ev.modification_en_attente && (
+                                  <span style={{ padding: '4px 12px', borderRadius: '999px', fontSize: '11px', fontWeight: 700, background: 'rgba(245,158,11,.15)', color: '#f59e0b' }}>
+                                    ⏳ Modification en attente
+                                  </span>
+                                )}
+                              </div>
+                              {/* Boutons d'action */}
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                {peutModifier && (
+                                  <button onClick={() => ouvrirModification(ev)} style={{
+                                    padding: '6px 12px', background: 'rgba(0,212,255,.1)', color: '#00d4ff',
+                                    border: '1px solid rgba(0,212,255,.3)', borderRadius: '6px',
+                                    fontSize: '12px', cursor: 'pointer', fontFamily: 'Poppins,sans-serif',
+                                  }}>
+                                    ✏️ Modifier
+                                  </button>
+                                )}
+                                {peutAnnuler && (
+                                  <button onClick={() => { setModalAnnuler(ev); setRaisonAnnulation(''); }} style={{
+                                    padding: '6px 12px', background: 'rgba(255,77,109,.15)', color: '#ff4d6d',
+                                    border: '1px solid rgba(255,77,109,.3)', borderRadius: '6px',
+                                    fontSize: '12px', cursor: 'pointer', fontFamily: 'Poppins,sans-serif',
+                                  }}>
+                                    Annuler
+                                  </button>
+                                )}
+                                {ev.stat_event === 'brouillon' && (
+                                  <button onClick={() => supprimerCreation(ev._id)} style={{
+                                    padding: '6px 12px', background: 'rgba(255,77,109,.15)', color: '#ff4d6d',
+                                    border: '1px solid rgba(255,77,109,.3)', borderRadius: '6px',
+                                    fontSize: '12px', cursor: 'pointer', fontFamily: 'Poppins,sans-serif',
+                                  }}>
+                                    Supprimer
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-                            <span style={{ padding: '4px 12px', borderRadius: '999px', fontSize: '11px', fontWeight: 700, background: s.bg, color: s.color }}>
-                              {s.label}
-                            </span>
-                            {ev.stat_event === 'brouillon' && (
-                              <button onClick={() => supprimerCreation(ev._id)} style={{
-                                padding: '6px 12px', background: 'rgba(255,77,109,.15)', color: '#ff4d6d',
-                                border: '1px solid rgba(255,77,109,.3)', borderRadius: '6px',
-                                fontSize: '12px', cursor: 'pointer', fontFamily: 'Poppins,sans-serif',
-                              }}>
-                                Supprimer
-                              </button>
-                            )}
                           </div>
                         </div>
                       );
@@ -709,7 +947,7 @@ const DashboardUser = () => {
                     <strong style={{ color: '#e8e8f0' }}>Comment ça marche ?</strong><br />
                     Vos événements soumis partent en{' '}
                     <span style={{ color: '#ff6b00' }}>brouillon</span> et doivent être validés par l'administrateur.
-                    Une fois <span style={{ color: '#00e676' }}>publié</span>, les participants pourront s'inscrire.
+                    Une fois <span style={{ color: '#00e676' }}>publié</span>, vous pouvez le modifier (soumis à validation orga/admin) ou l'annuler.
                   </div>
                 </>
               )}
@@ -817,6 +1055,140 @@ const DashboardUser = () => {
       {participantsModal && (
         <ParticipantsModal evenementId={participantsModal} onClose={() => setParticipantsModal(null)} />
       )}
+      {/* ── MODAL MODIFICATION ÉVÉNEMENT ── */}
+      {modalModifier && (
+        <div className="dash-overlay" onClick={() => setModalModifier(null)}>
+          <div className="dash-modal" onClick={e => e.stopPropagation()}>
+            <div className="dash-modal__header">
+              <h3>Modifier l'événement</h3>
+              <button className="dash-modal__close" onClick={() => setModalModifier(null)}>✕</button>
+            </div>
+
+            {/* Avertissement : la modification passe en validation */}
+            <div style={{
+              margin: '0 1.5rem 0',
+              padding: '10px 14px',
+              background: 'rgba(245,158,11,.1)',
+              border: '1px solid rgba(245,158,11,.3)',
+              borderRadius: '8px',
+              fontSize: '12px',
+              color: '#f59e0b',
+            }}>
+              ⏳ Vos modifications seront soumises à validation par un organisateur ou l'administrateur avant d'être appliquées.
+            </div>
+
+            <form onSubmit={soumettreModification} className="admin-form">
+              <div className="form-group">
+                <label>Titre *</label>
+                <input type="text" value={formModif.title_event || ''}
+                  onChange={e => setFormModif({ ...formModif, title_event: e.target.value })}
+                  required />
+              </div>
+              <div className="form-group">
+                <label>Description</label>
+                <textarea rows={3} value={formModif.event_description || ''}
+                  onChange={e => setFormModif({ ...formModif, event_description: e.target.value })} />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Date et heure de début *</label>
+                  <input type="datetime-local" value={formModif.ev_start_time || ''}
+                    onChange={e => setFormModif({ ...formModif, ev_start_time: e.target.value })} required />
+                </div>
+                <div className="form-group">
+                  <label>Date et heure de fin</label>
+                  <input type="datetime-local" value={formModif.ev_end_time || ''}
+                    onChange={e => setFormModif({ ...formModif, ev_end_time: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Participants max</label>
+                  <input type="number" min="2" value={formModif.max_participants || 10}
+                    onChange={e => setFormModif({ ...formModif, max_participants: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Lieu</label>
+                  <select value={formModif.location || ''}
+                    onChange={e => setFormModif({ ...formModif, location: e.target.value })}
+                    style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
+                    <option value="">— Sélectionner —</option>
+                    {locations.map(l => <option key={l._id} value={l._id}>{l.name_location}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Type de sport</label>
+                <select value={formModif.categories?.[0] || ''}
+                  onChange={e => setFormModif({ ...formModif, categories: e.target.value ? [e.target.value] : [] })}
+                  style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
+                  <option value="">— Sélectionner —</option>
+                  {categories.map(c => (
+                    <option key={c._id} value={c._id}>{c.event_categ} — {c.event_type}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="dash-modal__footer">
+                <button type="submit" className="dash-btn-primary" disabled={savingModif}>
+                  {savingModif ? 'Envoi...' : '📨 Soumettre la modification'}
+                </button>
+                <button type="button" className="dash-btn-ghost" onClick={() => setModalModifier(null)}>
+                  Annuler
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL ANNULATION ÉVÉNEMENT ── */}
+      {modalAnnuler && (
+        <div className="dash-overlay" onClick={() => setModalAnnuler(null)}>
+          <div className="dash-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="dash-modal__header">
+              <h3>Annuler l'événement</h3>
+              <button className="dash-modal__close" onClick={() => setModalAnnuler(null)}>✕</button>
+            </div>
+            <div style={{ padding: '0 1.5rem 1rem' }}>
+              <p style={{ color: '#8888aa', fontSize: 13, marginBottom: 16 }}>
+                Vous êtes sur le point d'annuler <strong style={{ color: '#e8e8f0' }}>"{modalAnnuler.title_event}"</strong>.
+                Tous les participants seront notifiés automatiquement.
+              </p>
+              <form onSubmit={confirmerAnnulation}>
+                <div className="form-group">
+                  <label style={{ color: '#e8e8f0', fontSize: 13 }}>Raison de l'annulation *</label>
+                  <textarea rows={4}
+                    value={raisonAnnulation}
+                    onChange={e => setRaisonAnnulation(e.target.value)}
+                    placeholder="Ex : Terrain indisponible suite aux intempéries, report à une date ultérieure..."
+                    style={{ background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 8, padding: '10px 12px', width: '100%', fontFamily: 'Poppins,sans-serif', resize: 'vertical', boxSizing: 'border-box' }}
+                    required />
+                </div>
+                {/* Prévisualisation du message envoyé aux participants */}
+                {raisonAnnulation.trim() && (
+                  <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(255,77,109,.08)', border: '1px solid rgba(255,77,109,.2)', borderRadius: 8, fontSize: 12, color: '#8888aa' }}>
+                    <strong style={{ color: '#ff4d6d', display: 'block', marginBottom: 4 }}>Message envoyé aux participants :</strong>
+                    L'événement "{modalAnnuler.title_event}" a été annulé. Raison : {raisonAnnulation.trim()}. Nous vous présentons nos excuses pour la gêne occasionnée.
+                  </div>
+                )}
+                <div className="dash-modal__footer">
+                  <button type="submit" style={{
+                    padding: '10px 20px', background: 'rgba(255,77,109,.2)', color: '#ff4d6d',
+                    border: '1px solid rgba(255,77,109,.5)', borderRadius: 8, cursor: 'pointer',
+                    fontFamily: 'Poppins,sans-serif', fontWeight: 600, fontSize: 14,
+                  }} disabled={savingAnnulation}>
+                    {savingAnnulation ? 'Annulation...' : '✕ Confirmer l\'annulation'}
+                  </button>
+                  <button type="button" className="dash-btn-ghost" onClick={() => setModalAnnuler(null)}>
+                    Retour
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal noter événement */}
       {notingEvent && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}

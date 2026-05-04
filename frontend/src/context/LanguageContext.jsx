@@ -738,11 +738,11 @@ const LanguageContext = createContext(null);
 // ─────────────────────────────────────────────────────────────
 export const LanguageProvider = ({ children }) => {
 
-  // Lire la langue sauvegardée, ou 'fr' par défaut
+  // Lire la langue sauvegardée, ou 'en' par défaut
   const [langue, setLangueState] = useState(() => {
     const saved = localStorage.getItem('event_langue');
     // Vérifier que la langue sauvegardée existe vraiment dans translations
-    return translations[saved] ? saved : 'ar';
+    return translations[saved] ? saved : 'en';
   });
 
   // Langues qui s'écrivent de droite à gauche
@@ -779,10 +779,10 @@ export const LanguageProvider = ({ children }) => {
   };
 
   // Fonction de traduction
-  // Si la clé n'existe pas dans la langue active → chercher en français → retourner la clé brute
+  // Si la clé n'existe pas dans la langue active → chercher en anglais → retourner la clé brute
   const t = (cle) => {
-    const dict = translations[langue] || translations['fr'];
-    return dict[cle] ?? translations['fr']?.[cle] ?? cle;
+    const dict = translations[langue] || translations['en'];
+    return dict[cle] ?? translations['en']?.[cle] ?? cle;
   };
 
   return (

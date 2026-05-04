@@ -5,7 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { verifyToken, isAdmin } = require('../middleware/auth');
+const { verifyToken, isAdmin, isOrganisateur } = require('../middleware/auth');
 const {
   getEvenements,
   getTousEvenements,
@@ -17,6 +17,10 @@ const {
   qrScan,
   getSuggestions,
   noterEvenement,
+  // Cycle de vie
+  annulerEvenement,
+  approuverModification,
+  refuserModification,
 } = require('../controllers/evenementController');
 
 // GET /api/evenements — Événements publiés (accessible sans connexion)
@@ -49,5 +53,18 @@ router.post('/:id/qr-scan', verifyToken, qrScan);
 
 // POST /api/evenements/:id/noter — Noter un événement (présent)
 router.post('/:id/noter', verifyToken, noterEvenement);
+
+// ── Cycle de vie ──────────────────────────────────────────────
+// Ces routes sont placées après /:id/noter pour éviter tout conflit.
+
+// POST /api/evenements/:id/annuler — Annuler avec raison obligatoire
+// Accessible au créateur, organisateur et admin
+router.post('/:id/annuler', verifyToken, annulerEvenement);
+
+// POST /api/evenements/:id/approuver-modification — Orga/admin approuve
+router.post('/:id/approuver-modification', verifyToken, isOrganisateur, approuverModification);
+
+// POST /api/evenements/:id/refuser-modification — Orga/admin refuse avec raison
+router.post('/:id/refuser-modification', verifyToken, isOrganisateur, refuserModification);
 
 module.exports = router;

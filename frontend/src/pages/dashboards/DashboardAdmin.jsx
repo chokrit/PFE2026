@@ -22,6 +22,15 @@ import MonEspaceModal from '../../components/dashboard/MonEspaceModal';
 import NotificationBell from '../../components/dashboard/NotificationBell';
 import '../../styles/dashboard/dashboard.css';
 import '../../styles/dashboard/admin.css';
+import '../../styles/dashboard/organisateur.css';
+
+const mkDates = () => {
+  const p = n => String(n).padStart(2, '0');
+  const fmt = d => `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  const dS = new Date(); dS.setHours(dS.getHours() + 2, 0, 0, 0);
+  const dE = new Date(dS); dE.setHours(dE.getHours() + 1);
+  return { start: fmt(dS), end: fmt(dE) };
+};
 
 const DashboardAdmin = () => {
   const navigate = useNavigate();
@@ -41,9 +50,9 @@ const DashboardAdmin = () => {
   const [medias, setMedias] = useState([]);
   const [modalEvent, setModalEvent] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [newEvent, setNewEvent] = useState({
-    title_event: '', event_description: '', ev_start_time: '',
-    ev_end_time: '', max_participants: 30, location: '', categories: [], stat_event: 'brouillon',
+  const [newEvent, setNewEvent] = useState(() => {
+    const { start, end } = mkDates();
+    return { title_event: '', event_description: '', ev_start_time: start, ev_end_time: end, max_participants: 30, location: '', categories: [], stat_event: 'brouillon' };
   });
 
   const [userSearch, setUserSearch] = useState('');
@@ -57,6 +66,39 @@ const DashboardAdmin = () => {
   const [mesRecompenses, setMesRecompenses]     = useState([]);
   const [suggestions, setSuggestions]           = useState([]);
   const [qrModal, setQrModal]                   = useState(null);
+
+  // ── Gestion des catégories / suggestions de sports ───────
+  const [suggestionsCats, setSuggestionsCats]   = useState([]);
+  const [raisonRefusCat, setRaisonRefusCat]     = useState({});
+  const [savingCat, setSavingCat]               = useState({});
+
+  // ── Lieux ──────────────────────────────────────────────────
+  const [suggestionLieux, setSuggestionLieux]   = useState([]);
+  const [raisonRefusLieu, setRaisonRefusLieu]   = useState({});
+  const [savingLieu, setSavingLieu]             = useState({});
+  // Formulaires inline dans la modale de création d'événement
+  const [showSuggCat, setShowSuggCat]           = useState(false);
+  const [suggCatForm, setSuggCatForm]           = useState({ event_categ: '', event_type: '' });
+  const [savingSuggCat, setSavingSuggCat]       = useState(false);
+  const [showSuggLieu, setShowSuggLieu]         = useState(false);
+  const [suggLieuNom, setSuggLieuNom]           = useState('');
+  const [suggLieuCap, setSuggLieuCap]           = useState('');
+  const [savingSuggLieu, setSavingSuggLieu]     = useState(false);
+
+  // ── Cycle de vie : annulation + validation modifications ─
+  const [modalAnnulerEv, setModalAnnulerEv]     = useState(null);
+  const [raisonAnnulEv, setRaisonAnnulEv]       = useState('');
+  const [savingAnnulEv, setSavingAnnulEv]       = useState(false);
+  const [refusModifId, setRefusModifId]         = useState(null);
+  const [raisonRefus, setRaisonRefus]           = useState('');
+  const [savingModifAction, setSavingModifAction] = useState(false);
+
+  // ── Scanner de présences QR ────────────────────────────────
+  const [scanToken, setScanToken]       = useState('');
+  const [scanResultat, setScanResultat] = useState(null);
+  const [scanErreur, setScanErreur]     = useState('');
+  const [scanEnCours, setScanEnCours]   = useState(false);
+  const [qrEventId, setQrEventId]       = useState('');
 
   useEffect(() => {
     const token = localStorage.getItem('event_token');
@@ -73,7 +115,7 @@ const DashboardAdmin = () => {
   const charger = async () => {
     setLoading(true);
     try {
-      const [usersR, evsR, locsR, catsR, mediasR, inscR, dispoR, suggR] = await Promise.allSettled([
+      const [usersR, evsR, locsR, catsR, mediasR, inscR, dispoR, suggR, suggCatsR, suggLieuxR] = await Promise.allSettled([
         api.get('/utilisateurs'),
         api.get('/evenements/all'),
         api.get('/locations'),
@@ -82,6 +124,8 @@ const DashboardAdmin = () => {
         api.get('/participations/mes-inscriptions'),
         api.get('/evenements'),
         api.get('/evenements/suggestions'),
+        api.get('/categories/suggestions'),
+        api.get('/locations/suggestions'),
       ]);
       if (mediasR.status === 'fulfilled') setMedias(mediasR.value?.data?.medias || []);
       if (usersR.status === 'fulfilled') {
@@ -105,7 +149,9 @@ const DashboardAdmin = () => {
       if (catsR.status === 'fulfilled') setCategories(catsR.value.data.categories || []);
       if (inscR.status === 'fulfilled')  setMesInscriptions(inscR.value.data.participations || []);
       if (dispoR.status === 'fulfilled') setEvenementsDispos(dispoR.value.data.evenements || []);
-      if (suggR.status === 'fulfilled')  setSuggestions(suggR.value.data.suggestions || []);
+      if (suggR.status === 'fulfilled')       setSuggestions(suggR.value.data.suggestions || []);
+      if (suggCatsR.status === 'fulfilled')   setSuggestionsCats(suggCatsR.value.data.suggestions || []);
+      if (suggLieuxR.status === 'fulfilled')  setSuggestionLieux(suggLieuxR.value.data.suggestions || []);
       try {
         const rew = await api.get('/recompenses/mes-coupons');
         setMesRecompenses(rew.data.coupons || []);
@@ -114,6 +160,113 @@ const DashboardAdmin = () => {
   };
 
   const flash = (type, msg) => { setNotif({ type, msg }); setTimeout(() => setNotif(null), 4000); };
+
+  // ── Suggérer une catégorie depuis le formulaire d'événement ─
+  const soumettreSuggCat = async () => {
+    if (!suggCatForm.event_categ.trim() || !suggCatForm.event_type.trim()) {
+      flash('error', 'Groupe et sport sont obligatoires');
+      return;
+    }
+    setSavingSuggCat(true);
+    try {
+      const res = await api.post('/categories/suggerer', suggCatForm);
+      flash('success', res.data.message);
+      setSuggCatForm({ event_categ: '', event_type: '' });
+      setShowSuggCat(false);
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur suggestion');
+    } finally {
+      setSavingSuggCat(false);
+    }
+  };
+
+  // ── Suggérer un lieu depuis le formulaire d'événement ───
+  const soumettreSuggLieu = async () => {
+    if (!suggLieuNom.trim()) { flash('error', 'Le nom du lieu est obligatoire'); return; }
+    setSavingSuggLieu(true);
+    try {
+      const res = await api.post('/locations/suggerer', {
+        name_location: suggLieuNom.trim(),
+        location_capacity: suggLieuCap ? Number(suggLieuCap) : 0,
+      });
+      flash('success', res.data.message);
+      setSuggLieuNom('');
+      setSuggLieuCap('');
+      setShowSuggLieu(false);
+      charger();
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur suggestion');
+    } finally {
+      setSavingSuggLieu(false);
+    }
+  };
+
+  // ── Valider un lieu suggéré ───────────────────────────────
+  const validerLieu = async (lieuId) => {
+    setSavingLieu(p => ({ ...p, [lieuId]: true }));
+    try {
+      const res = await api.put(`/locations/${lieuId}/valider`);
+      flash('success', res.data.message);
+      setSuggestionLieux(p => p.filter(l => l._id !== lieuId));
+      const locsRes = await api.get('/locations');
+      setLocations(locsRes.data.locations || []);
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur validation');
+    } finally {
+      setSavingLieu(p => ({ ...p, [lieuId]: false }));
+    }
+  };
+
+  // ── Refuser un lieu suggéré ───────────────────────────────
+  const refuserLieu = async (lieuId) => {
+    setSavingLieu(p => ({ ...p, [lieuId]: true }));
+    try {
+      const res = await api.put(`/locations/${lieuId}/refuser`, {
+        raison: raisonRefusLieu[lieuId]?.trim() || '',
+      });
+      flash('success', res.data.message);
+      setSuggestionLieux(p => p.filter(l => l._id !== lieuId));
+      setRaisonRefusLieu(p => { const n = { ...p }; delete n[lieuId]; return n; });
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur refus');
+    } finally {
+      setSavingLieu(p => ({ ...p, [lieuId]: false }));
+    }
+  };
+
+  // ── Valider une suggestion de catégorie sportive ─────────
+  const validerCat = async (catId) => {
+    setSavingCat(p => ({ ...p, [catId]: true }));
+    try {
+      const res = await api.put(`/categories/${catId}/valider`);
+      flash('success', res.data.message);
+      setSuggestionsCats(p => p.filter(c => c._id !== catId));
+      // Rafraîchir la liste des catégories actives
+      const catsRes = await api.get('/categories');
+      setCategories(catsRes.data.categories || []);
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur validation');
+    } finally {
+      setSavingCat(p => ({ ...p, [catId]: false }));
+    }
+  };
+
+  // ── Refuser une suggestion de catégorie sportive ─────────
+  const refuserCat = async (catId) => {
+    setSavingCat(p => ({ ...p, [catId]: true }));
+    try {
+      const res = await api.put(`/categories/${catId}/refuser`, {
+        raison: raisonRefusCat[catId]?.trim() || '',
+      });
+      flash('success', res.data.message);
+      setSuggestionsCats(p => p.filter(c => c._id !== catId));
+      setRaisonRefusCat(p => { const n = { ...p }; delete n[catId]; return n; });
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur refus');
+    } finally {
+      setSavingCat(p => ({ ...p, [catId]: false }));
+    }
+  };
 
   const changerRole = async (userId, role) => {
     try {
@@ -150,7 +303,8 @@ const DashboardAdmin = () => {
       const res = await api.post('/evenements', payload);
       flash('success', res.data.message || 'Événement créé !');
       setModalEvent(false);
-      setNewEvent({ title_event: '', event_description: '', ev_start_time: '', ev_end_time: '', max_participants: 30, location: '', categories: [], stat_event: 'brouillon' });
+      const { start, end } = mkDates();
+      setNewEvent({ title_event: '', event_description: '', ev_start_time: start, ev_end_time: end, max_participants: 30, location: '', categories: [], stat_event: 'brouillon' });
       charger();
     } catch (err) {
       flash('error', err.response?.data?.message || 'Erreur création');
@@ -212,19 +366,110 @@ const DashboardAdmin = () => {
     } catch { flash('error', 'Erreur suppression'); }
   };
 
+  // ── Annuler un événement avec raison obligatoire ────────
+  const confirmerAnnulationEv = async (e) => {
+    e.preventDefault();
+    if (!raisonAnnulEv.trim()) { flash('error', 'La raison est obligatoire'); return; }
+    setSavingAnnulEv(true);
+    try {
+      const res = await api.post(`/evenements/${modalAnnulerEv._id}/annuler`, { raison: raisonAnnulEv.trim() });
+      flash('success', res.data.message);
+      setModalAnnulerEv(null);
+      setRaisonAnnulEv('');
+      charger();
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur annulation');
+    } finally { setSavingAnnulEv(false); }
+  };
+
+  // ── Approuver une modification soumise par un créateur ──
+  const approuverModif = async (eventId) => {
+    setSavingModifAction(true);
+    try {
+      const res = await api.post(`/evenements/${eventId}/approuver-modification`);
+      flash('success', res.data.message);
+      charger();
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur approbation');
+    } finally { setSavingModifAction(false); }
+  };
+
+  // ── Refuser une modification avec raison obligatoire ────
+  const refuserModif = async (e) => {
+    e.preventDefault();
+    if (!raisonRefus.trim()) { flash('error', 'La raison est obligatoire'); return; }
+    setSavingModifAction(true);
+    try {
+      const res = await api.post(`/evenements/${refusModifId}/refuser-modification`, { raison: raisonRefus.trim() });
+      flash('success', res.data.message);
+      setRefusModifId(null);
+      setRaisonRefus('');
+      charger();
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur refus');
+    } finally { setSavingModifAction(false); }
+  };
+
   const usersFiltres = utilisateurs.filter(u => {
     const q = userSearch.toLowerCase();
     return !q || `${u.first_name} ${u.last_name} ${u.email} ${u.telephone || ''} ${u.role}`.toLowerCase().includes(q);
   });
   const evsFiltres = filtreStatut === 'tous' ? evenements : evenements.filter(e => e.stat_event === filtreStatut);
 
-  // Événements soumis par des users qui attendent validation
+  // Événements soumis par des users qui attendent validation (publication)
   const aValider = evenements.filter(ev =>
     ev.stat_event === 'brouillon' &&
     ev.createur?._id &&
     adminUser?._id &&
     ev.createur._id.toString() !== adminUser._id.toString()
   );
+
+  // Événements avec une modification en attente d'approbation
+  const aModifier = evenements.filter(ev => ev.modification_en_attente);
+
+  // ── Scanner : calcule si le scan est autorisé maintenant ──
+  const statutFenetreHoraire = (ev) => {
+    if (!ev?.ev_start_time) return 'autre_jour';
+    const maintenant = new Date();
+    const debut      = new Date(ev.ev_start_time);
+    const fin        = ev.ev_end_time ? new Date(ev.ev_end_time) : null;
+    const memeJour =
+      maintenant.getFullYear() === debut.getFullYear() &&
+      maintenant.getMonth()    === debut.getMonth()    &&
+      maintenant.getDate()     === debut.getDate();
+    if (!memeJour)               return maintenant < debut ? 'avant' : 'apres';
+    if (maintenant < debut)      return 'avant';
+    if (fin && maintenant > fin) return 'apres';
+    return 'pendant';
+  };
+
+  const soumettreScan = async (e) => {
+    e.preventDefault();
+    const token = scanToken.trim();
+    if (!token) return;
+    setScanEnCours(true);
+    setScanResultat(null);
+    setScanErreur('');
+    try {
+      const res = await api.post('/participations/valider-presence', { qr_token: token });
+      setScanResultat(res.data.participant);
+      setScanToken('');
+    } catch (err) {
+      setScanErreur(err.response?.data?.message || 'Erreur lors de la validation');
+    } finally {
+      setScanEnCours(false);
+    }
+  };
+
+  const evScan      = evenements.find(e => e._id === qrEventId) || null;
+  const fenetre     = evScan ? statutFenetreHoraire(evScan) : null;
+  const fenetreInfo = fenetre ? ({
+    pendant:    { color: '#00e676', bg: 'rgba(0,230,118,.12)',    label: '🟢 Scan autorisé — événement en cours' },
+    avant:      { color: '#ff6b00', bg: 'rgba(255,107,0,.10)',    label: '🟡 Événement pas encore commencé' },
+    apres:      { color: '#8888aa', bg: 'rgba(136,136,170,.10)',  label: '⬜ Événement terminé' },
+    autre_jour: { color: '#ff4d6d', bg: 'rgba(255,77,109,.10)',   label: "🔴 Le scan n'est autorisé que le jour de l'événement" },
+  }[fenetre] || null) : null;
+  const estTermine  = fenetre === 'apres';
 
   const badge = (s) => ({
     publié: { cls: 'badge-success', label: 'Publié' },
@@ -305,6 +550,8 @@ const DashboardAdmin = () => {
             { key: 'overview',          label: 'Vue globale',      icon: '📊' },
             { key: 'users',             label: 'Utilisateurs',     icon: '👥' },
             { key: 'events',            label: 'Événements',       icon: '🏟' },
+            { key: 'categories',         label: 'Catégories',       icon: '🏷' },
+            { key: 'scanner',           label: 'QR Code',          icon: '📷' },
             { key: 'medias',            label: 'Médias',           icon: '🖼' },
             { key: 'explorer',          label: 'Explorer',         icon: '🔍' },
             { key: 'mes-inscriptions',  label: 'Mes inscriptions', icon: '🎟' },
@@ -322,6 +569,11 @@ const DashboardAdmin = () => {
                   </span>
                 )}
               </>}
+              {t.key === 'categories' && (suggestionsCats.length + suggestionLieux.length) > 0 && (
+                <span style={{ background: '#a78bfa', color: '#fff', borderRadius: '999px', fontSize: '10px', fontWeight: 700, padding: '1px 6px' }}>
+                  {suggestionsCats.length + suggestionLieux.length}
+                </span>
+              )}
               {t.key === 'medias' && medias.length > 0 && (
                 <span style={{ background: '#f59e0b', color: '#000', borderRadius: '999px', fontSize: '10px', fontWeight: 700, padding: '1px 6px' }}>
                   {medias.length}
@@ -491,6 +743,58 @@ const DashboardAdmin = () => {
               </div>
             )}
 
+            {/* ── Modifications en attente ── */}
+            {aModifier.length > 0 && (
+              <div style={{ marginBottom: '1.5rem', padding: '14px 16px', background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.25)', borderRadius: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', marginBottom: 12 }}>
+                  ⏳ Modifications en attente de validation ({aModifier.length})
+                </div>
+                {aModifier.map(ev => (
+                  <div key={ev._id} style={{ background: '#0a0a1a', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#e8e8f0', marginBottom: 8 }}>{ev.title_event}</div>
+                    {/* Comparaison avant / après */}
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+                      <div style={{ flex: 1, minWidth: 180, padding: '8px 10px', background: 'rgba(255,77,109,.06)', border: '1px solid rgba(255,77,109,.2)', borderRadius: 8 }}>
+                        <div style={{ fontSize: 10, color: '#ff4d6d', fontWeight: 700, marginBottom: 4 }}>ACTUEL</div>
+                        {ev.modification_proposee?.titre && <div style={{ fontSize: 12, color: '#8888aa' }}>Titre : {ev.title_event}</div>}
+                        {ev.modification_proposee?.ev_start_time && (
+                          <div style={{ fontSize: 12, color: '#8888aa' }}>
+                            Début : {new Date(ev.ev_start_time).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        )}
+                        {ev.modification_proposee?.max_participants && <div style={{ fontSize: 12, color: '#8888aa' }}>Participants max : {ev.max_participants}</div>}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 180, padding: '8px 10px', background: 'rgba(0,230,118,.06)', border: '1px solid rgba(0,230,118,.2)', borderRadius: 8 }}>
+                        <div style={{ fontSize: 10, color: '#00e676', fontWeight: 700, marginBottom: 4 }}>PROPOSÉ</div>
+                        {ev.modification_proposee?.titre && <div style={{ fontSize: 12, color: '#e8e8f0' }}>Titre : {ev.modification_proposee.titre}</div>}
+                        {ev.modification_proposee?.ev_start_time && (
+                          <div style={{ fontSize: 12, color: '#e8e8f0' }}>
+                            Début : {new Date(ev.modification_proposee.ev_start_time).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        )}
+                        {ev.modification_proposee?.max_participants && <div style={{ fontSize: 12, color: '#e8e8f0' }}>Participants max : {ev.modification_proposee.max_participants}</div>}
+                        {ev.modification_proposee?.proposee_par && (
+                          <div style={{ fontSize: 11, color: '#8888aa', marginTop: 4 }}>
+                            par {ev.modification_proposee.proposee_par?.first_name} {ev.modification_proposee.proposee_par?.last_name}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => approuverModif(ev._id)} disabled={savingModifAction}
+                        style={{ padding: '6px 14px', background: 'rgba(0,230,118,.15)', color: '#00e676', border: '1px solid rgba(0,230,118,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                        ✓ Approuver
+                      </button>
+                      <button onClick={() => { setRefusModifId(ev._id); setRaisonRefus(''); }}
+                        style={{ padding: '6px 14px', background: 'rgba(255,77,109,.15)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                        ✕ Refuser
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Filtre statut */}
             <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
               {['tous', 'publié', 'brouillon', 'annulé', 'terminé'].map(s => (
@@ -522,11 +826,31 @@ const DashboardAdmin = () => {
                         <td className="text-muted" style={{ fontSize: '12px' }}>{ev.createur?.first_name} {ev.createur?.last_name}</td>
                         <td className="text-muted" style={{ fontSize: '12px' }}>{new Date(ev.ev_start_time).toLocaleDateString('fr-FR')}</td>
                         <td style={{ fontSize: '12px' }}>{ev.nb_inscrits || 0}/{ev.max_participants}</td>
-                        <td><span className={`badge ${b.cls}`}>{b.label}</span></td>
+                        <td>
+                          <span className={`badge ${b.cls}`}>{b.label}</span>
+                          {/* Badge modification en attente */}
+                          {ev.modification_en_attente && (
+                            <span style={{ marginLeft: 4, padding: '2px 7px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: 'rgba(245,158,11,.15)', color: '#f59e0b', display: 'inline-block' }}>
+                              ⏳
+                            </span>
+                          )}
+                        </td>
                         <td>
                           <div className="admin-actions">
                             {ev.stat_event === 'brouillon' && <button className="admin-btn-sm admin-btn-success" onClick={() => changerStatut(ev._id, 'publié')}>Publier</button>}
-                            {ev.stat_event === 'publié' && <button className="admin-btn-sm admin-btn-warning" onClick={() => changerStatut(ev._id, 'annulé')}>Annuler</button>}
+                            {ev.stat_event === 'publié' && (
+                              <button className="admin-btn-sm"
+                                style={{ background: '#00d4ff22', color: '#00d4ff', border: '1px solid #00d4ff44' }}
+                                onClick={() => { setQrEventId(ev._id); setScanResultat(null); setScanErreur(''); setScanToken(''); setActiveTab('scanner'); }}>
+                                📷 QR
+                              </button>
+                            )}
+                            {ev.stat_event === 'publié' && (
+                              <button className="admin-btn-sm admin-btn-warning"
+                                onClick={() => { setModalAnnulerEv(ev); setRaisonAnnulEv(''); }}>
+                                Annuler
+                              </button>
+                            )}
                             <button className="admin-btn-icon admin-btn-danger" onClick={() => supprimerEvent(ev._id)} title="Supprimer">✕</button>
                           </div>
                         </td>
@@ -602,17 +926,71 @@ const DashboardAdmin = () => {
                         onChange={e => setNewEvent({ ...newEvent, location: e.target.value })}
                         style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
                         <option value="">— Sélectionner —</option>
-                        {locations.map(l => <option key={l._id} value={l._id}>{l.name_location}</option>)}
+                        {locations.map(l => <option key={l._id} value={l._id}>{l.name_location}{l.location_capacity ? ` (${l.location_capacity} pers.)` : ''}</option>)}
                       </select>
+                      {!showSuggLieu ? (
+                        <button type="button" onClick={() => setShowSuggLieu(true)}
+                          style={{ marginTop: 5, fontSize: 11, color: '#8888aa', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'block' }}>
+                          + Mon lieu n'est pas dans la liste ? Suggérer
+                        </button>
+                      ) : (
+                        <div style={{ marginTop: 8, padding: '12px', background: 'rgba(0,212,255,.06)', border: '1px solid rgba(0,212,255,.2)', borderRadius: 8 }}>
+                          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                            <input placeholder="Nom du lieu *" value={suggLieuNom}
+                              onChange={e => setSuggLieuNom(e.target.value)}
+                              style={{ flex: 2, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                            <input placeholder="Capacité" type="number" min="0" value={suggLieuCap}
+                              onChange={e => setSuggLieuCap(e.target.value)}
+                              style={{ flex: 1, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button type="button" onClick={soumettreSuggLieu} disabled={savingSuggLieu}
+                              style={{ padding: '5px 12px', background: 'rgba(0,212,255,.2)', color: '#00d4ff', border: '1px solid rgba(0,212,255,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                              {savingSuggLieu ? '...' : '📍 Ajouter'}
+                            </button>
+                            <button type="button" onClick={() => { setShowSuggLieu(false); setSuggLieuNom(''); setSuggLieuCap(''); }}
+                              style={{ padding: '5px 10px', background: 'transparent', color: '#8888aa', border: '1px solid #2a2a4a', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                              Annuler
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="form-group">
-                      <label>Catégorie</label>
+                      <label>Type de sport</label>
                       <select value={newEvent.categories[0] || ''}
                         onChange={e => setNewEvent({ ...newEvent, categories: e.target.value ? [e.target.value] : [] })}
                         style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
                         <option value="">— Sélectionner —</option>
                         {categories.map(c => <option key={c._id} value={c._id}>{c.event_categ} — {c.event_type}</option>)}
                       </select>
+                      {!showSuggCat ? (
+                        <button type="button" onClick={() => setShowSuggCat(true)}
+                          style={{ marginTop: 5, fontSize: 11, color: '#8888aa', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'block' }}>
+                          + Mon sport n'est pas dans la liste ? Suggérer
+                        </button>
+                      ) : (
+                        <div style={{ marginTop: 8, padding: '12px', background: 'rgba(167,139,250,.06)', border: '1px solid rgba(167,139,250,.2)', borderRadius: 8 }}>
+                          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                            <input placeholder="Groupe (ex: Aquatique)" value={suggCatForm.event_categ}
+                              onChange={e => setSuggCatForm(p => ({ ...p, event_categ: e.target.value }))}
+                              style={{ flex: 1, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                            <input placeholder="Sport (ex: Natation)" value={suggCatForm.event_type}
+                              onChange={e => setSuggCatForm(p => ({ ...p, event_type: e.target.value }))}
+                              style={{ flex: 1, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button type="button" onClick={soumettreSuggCat} disabled={savingSuggCat}
+                              style={{ padding: '5px 12px', background: 'rgba(167,139,250,.2)', color: '#a78bfa', border: '1px solid rgba(167,139,250,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                              {savingSuggCat ? '...' : '🏷 Suggérer'}
+                            </button>
+                            <button type="button" onClick={() => { setShowSuggCat(false); setSuggCatForm({ event_categ: '', event_type: '' }); }}
+                              style={{ padding: '5px 10px', background: 'transparent', color: '#8888aa', border: '1px solid #2a2a4a', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                              Annuler
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="dash-modal__footer">
                       <button type="submit" className="dash-btn-primary" disabled={saving}>
@@ -624,6 +1002,174 @@ const DashboardAdmin = () => {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ══ CATÉGORIES ══ */}
+        {activeTab === 'categories' && (
+          <div>
+            <h2 className="dash-section-title" style={{ marginBottom: '1.5rem' }}>Catégories & Lieux</h2>
+
+            {/* ── Lieux en attente ── */}
+            {suggestionLieux.length > 0 && (
+              <div style={{ marginBottom: '2rem' }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: '#00d4ff', marginBottom: 12 }}>
+                  📍 Lieux en attente ({suggestionLieux.length})
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {suggestionLieux.map(lieu => (
+                    <div key={lieu._id} style={{
+                      background: 'rgba(0,212,255,.05)', border: '1px solid rgba(0,212,255,.2)',
+                      borderRadius: 12, padding: '14px 16px',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 600, color: '#e8e8f0' }}>
+                            {lieu.name_location}
+                            {lieu.location_capacity > 0 && (
+                              <span style={{ fontSize: 12, color: '#8888aa', marginLeft: 8 }}>· {lieu.location_capacity} pers.</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#555577', marginTop: 4 }}>
+                            Proposé par : {lieu.suggere_par?.first_name} {lieu.suggere_par?.last_name}
+                            {' · '}{new Date(lieu.createdAt).toLocaleDateString('fr-FR')}
+                          </div>
+                        </div>
+                        <button onClick={() => validerLieu(lieu._id)} disabled={savingLieu[lieu._id]} style={{
+                          padding: '7px 16px', background: 'rgba(0,230,118,.15)', color: '#00e676',
+                          border: '1px solid rgba(0,230,118,.3)', borderRadius: 7, cursor: 'pointer',
+                          fontFamily: 'Poppins,sans-serif', fontSize: 12, fontWeight: 600, alignSelf: 'flex-start',
+                        }}>
+                          ✓ Valider
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <input type="text"
+                          value={raisonRefusLieu[lieu._id] || ''}
+                          onChange={e => setRaisonRefusLieu(p => ({ ...p, [lieu._id]: e.target.value }))}
+                          placeholder="Raison du refus (optionnel)"
+                          style={{ flex: 1, background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                        <button onClick={() => refuserLieu(lieu._id)} disabled={savingLieu[lieu._id]} style={{
+                          padding: '7px 14px', background: 'rgba(255,77,109,.15)', color: '#ff4d6d',
+                          border: '1px solid rgba(255,77,109,.3)', borderRadius: 7, cursor: 'pointer',
+                          fontFamily: 'Poppins,sans-serif', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                        }}>
+                          ✕ Refuser
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Suggestions en attente ── */}
+            <div style={{ marginBottom: '2rem' }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: suggestionsCats.length > 0 ? '#a78bfa' : '#8888aa', marginBottom: 12 }}>
+                💡 Suggestions en attente ({suggestionsCats.length})
+              </h3>
+
+              {suggestionsCats.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#555577', fontStyle: 'italic' }}>
+                  Aucune suggestion en attente.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {suggestionsCats.map(cat => (
+                    <div key={cat._id} style={{
+                      background: 'rgba(167,139,250,.05)', border: '1px solid rgba(167,139,250,.2)',
+                      borderRadius: 12, padding: '14px 16px',
+                    }}>
+                      {/* Infos de la suggestion */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 600, color: '#e8e8f0' }}>
+                            {cat.event_type}
+                            <span style={{ fontSize: 12, color: '#8888aa', marginLeft: 8 }}>
+                              dans "{cat.event_categ}"
+                            </span>
+                          </div>
+                          {cat.raison_suggestion && (
+                            <div style={{ fontSize: 12, color: '#8888aa', marginTop: 4, fontStyle: 'italic' }}>
+                              "{cat.raison_suggestion}"
+                            </div>
+                          )}
+                          <div style={{ fontSize: 11, color: '#555577', marginTop: 4 }}>
+                            Proposé par : {cat.suggere_par?.first_name} {cat.suggere_par?.last_name}
+                            {' · '}{new Date(cat.createdAt).toLocaleDateString('fr-FR')}
+                          </div>
+                        </div>
+                        {/* Bouton Valider */}
+                        <button onClick={() => validerCat(cat._id)} disabled={savingCat[cat._id]} style={{
+                          padding: '7px 16px', background: 'rgba(0,230,118,.15)', color: '#00e676',
+                          border: '1px solid rgba(0,230,118,.3)', borderRadius: 7, cursor: 'pointer',
+                          fontFamily: 'Poppins,sans-serif', fontSize: 12, fontWeight: 600, alignSelf: 'flex-start',
+                        }}>
+                          ✓ Valider
+                        </button>
+                      </div>
+
+                      {/* Champ raison refus + bouton Refuser */}
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <input type="text"
+                          value={raisonRefusCat[cat._id] || ''}
+                          onChange={e => setRaisonRefusCat(p => ({ ...p, [cat._id]: e.target.value }))}
+                          placeholder="Raison du refus (optionnel)"
+                          style={{ flex: 1, background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                        <button onClick={() => refuserCat(cat._id)} disabled={savingCat[cat._id]} style={{
+                          padding: '7px 14px', background: 'rgba(255,77,109,.15)', color: '#ff4d6d',
+                          border: '1px solid rgba(255,77,109,.3)', borderRadius: 7, cursor: 'pointer',
+                          fontFamily: 'Poppins,sans-serif', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                        }}>
+                          ✕ Refuser
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── Liste des catégories actives ── */}
+            <div>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#00e676', marginBottom: 12 }}>
+                ✓ Catégories actives ({categories.length})
+              </h3>
+              {categories.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#555577' }}>Aucune catégorie active.</p>
+              ) : (
+                (() => {
+                  const grouped = categories.reduce((acc, c) => {
+                    const k = c.event_categ || 'Autre';
+                    if (!acc[k]) acc[k] = [];
+                    acc[k].push(c);
+                    return acc;
+                  }, {});
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      {Object.entries(grouped).map(([groupe, cats]) => (
+                        <div key={groupe}>
+                          <div style={{ fontSize: 11, color: '#8888aa', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                            {groupe}
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {cats.map(c => (
+                              <span key={c._id} style={{
+                                padding: '4px 12px', fontSize: 12, borderRadius: 20, fontWeight: 500,
+                                background: 'rgba(0,230,118,.08)', color: '#00e676',
+                                border: '1px solid rgba(0,230,118,.2)',
+                              }}>
+                                {c.event_type || c.event_categ}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()
+              )}
+            </div>
           </div>
         )}
 
@@ -776,10 +1322,13 @@ const DashboardAdmin = () => {
                         onClick={() => setQrModal({ eventId: ins.eventId, token: ins.qr_token, titre: ins.titre, qr_utilise: ins.qr_utilise })}>
                         {ins.qr_utilise ? '✅ QR scanné' : '📱 QR'}
                       </button>
-                      <button onClick={() => annulerInscription(ins.eventId)}
-                        style={{ fontSize: 12, padding: '5px 10px', background: 'rgba(255,77,109,.1)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
-                        Annuler
-                      </button>
+                      {/* Masquer si événement terminé ou annulé */}
+                      {!['terminé', 'annulé'].includes(ins.stat_event) && (
+                        <button onClick={() => annulerInscription(ins.eventId)}
+                          style={{ fontSize: 12, padding: '5px 10px', background: 'rgba(255,77,109,.1)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                          Annuler
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -802,8 +1351,285 @@ const DashboardAdmin = () => {
           )
         )}
 
+        {/* ══ SCANNER QR ══ */}
+        {activeTab === 'scanner' && (
+          <div className="orga-scanner-section">
+            <h2 className="dash-section-title">Validation des présences</h2>
+            <p className="dash-section-desc">
+              Scannez ou saisissez le token QR personnel de chaque participant pour confirmer sa présence.
+              Le scan n'est accepté que le jour exact de l'événement, entre l'heure de début et de fin.
+            </p>
+
+            <div className="orga-scanner-card">
+              {/* Sélecteur d'événement */}
+              <div className="form-group" style={{ marginBottom: fenetreInfo ? '1rem' : '1.5rem' }}>
+                <label style={{ fontSize: 13, color: '#8888aa', marginBottom: 6, display: 'block' }}>
+                  Événement à scanner :
+                </label>
+                <select
+                  value={qrEventId}
+                  onChange={e => {
+                    setQrEventId(e.target.value);
+                    setScanResultat(null);
+                    setScanErreur('');
+                    setScanToken('');
+                  }}
+                  style={{
+                    background: '#1a1a35', color: '#e8e8f0',
+                    padding: '8px 12px', borderRadius: '8px',
+                    border: '1px solid #2a2a4a', width: '100%',
+                    cursor: 'pointer', fontFamily: 'Poppins,sans-serif',
+                  }}
+                >
+                  <option value="">— Choisir un événement publié —</option>
+                  {evenements.filter(e => e.stat_event === 'publié').map(e => (
+                    <option key={e._id} value={e._id}>{e.title_event}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Indicateur fenêtre horaire */}
+              {fenetreInfo && (
+                <div style={{
+                  padding: '10px 14px', borderRadius: 8, marginBottom: '1.5rem',
+                  background: fenetreInfo.bg,
+                  border: `1px solid ${fenetreInfo.color}44`,
+                  fontSize: 13, color: fenetreInfo.color, fontWeight: 600,
+                }}>
+                  {fenetreInfo.label}
+                  {evScan?.ev_start_time && (
+                    <span style={{ fontWeight: 400, color: '#8888aa', marginLeft: 10 }}>
+                      {new Date(evScan.ev_start_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      {evScan.ev_end_time && ` → ${new Date(evScan.ev_end_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Formulaire de saisie du token */}
+              {evScan && (
+                <form onSubmit={soumettreScan}>
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label style={{ fontSize: 13, color: '#8888aa', marginBottom: 6, display: 'block' }}>
+                      Token QR du participant :
+                    </label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        value={scanToken}
+                        onChange={e => { setScanToken(e.target.value); setScanErreur(''); setScanResultat(null); }}
+                        placeholder={fenetre !== 'pendant' ? 'Scan non autorisé en dehors de la fenêtre horaire' : 'Collez ou scannez le token du participant…'}
+                        disabled={fenetre !== 'pendant'}
+                        style={{
+                          flex: 1, background: fenetre !== 'pendant' ? '#0d0d20' : '#0a0a1a',
+                          color: fenetre !== 'pendant' ? '#555' : '#e8e8f0',
+                          border: '1px solid #2a2a4a', borderRadius: 8,
+                          padding: '10px 14px', fontFamily: 'monospace',
+                          fontSize: 13, cursor: fenetre !== 'pendant' ? 'not-allowed' : 'text',
+                        }}
+                        autoFocus={fenetre === 'pendant'}
+                      />
+                      <button
+                        type="submit"
+                        className="dash-btn-primary"
+                        disabled={scanEnCours || !scanToken.trim() || fenetre !== 'pendant'}
+                        style={{ whiteSpace: 'nowrap', opacity: fenetre !== 'pendant' ? 0.4 : 1 }}
+                      >
+                        {scanEnCours ? '…' : '✓ Valider'}
+                      </button>
+                    </div>
+                    <p style={{ fontSize: 11, color: '#555', marginTop: 6 }}>
+                      💡 Demandez au participant d'afficher son QR code, puis copiez son token ici.
+                    </p>
+                  </div>
+                </form>
+              )}
+
+              {/* Résultat du scan — succès */}
+              {scanResultat && (
+                <div style={{
+                  marginTop: '1rem', padding: '16px 18px',
+                  background: 'rgba(0,230,118,.08)',
+                  border: '1px solid rgba(0,230,118,.3)',
+                  borderRadius: 12,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <div style={{
+                      width: 48, height: 48, borderRadius: '50%',
+                      background: '#00e67622', border: '2px solid #00e676',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 20, fontWeight: 700, color: '#00e676',
+                    }}>
+                      {scanResultat.prenom?.[0]}{scanResultat.nom?.[0]}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#00e676', fontSize: 16 }}>
+                        ✅ {scanResultat.prenom} {scanResultat.nom}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#8888aa' }}>
+                        Présence confirmée · Fiabilité {scanResultat.fiabilite}%
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: 90, background: '#0a0a1a', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: '#00d4ff' }}>+{scanResultat.points_gagnes}</div>
+                      <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>points gagnés</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 90, background: '#0a0a1a', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: '#ffd700' }}>{scanResultat.cumul_points}</div>
+                      <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>total points</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 90, background: '#0a0a1a', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#a78bfa' }}>{scanResultat.niveau_apres}</div>
+                      <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>niveau</div>
+                    </div>
+                  </div>
+                  {scanResultat.passage_niveau && (
+                    <div style={{
+                      marginTop: 10, padding: '8px 12px',
+                      background: 'rgba(167,139,250,.15)', border: '1px solid rgba(167,139,250,.3)',
+                      borderRadius: 8, fontSize: 13, color: '#a78bfa', fontWeight: 600, textAlign: 'center',
+                    }}>
+                      🏆 Passage de niveau : {scanResultat.niveau_avant} → {scanResultat.niveau_apres}
+                    </div>
+                  )}
+                  {scanResultat.coupon_declenche && (
+                    <div style={{
+                      marginTop: 8, padding: '8px 12px',
+                      background: 'rgba(255,107,0,.12)', border: '1px solid rgba(255,107,0,.3)',
+                      borderRadius: 8, fontSize: 13, color: '#ff6b00', fontWeight: 600, textAlign: 'center',
+                    }}>
+                      🎫 Un coupon de réduction a été débloqué pour ce participant !
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Résultat du scan — erreur */}
+              {scanErreur && (
+                <div style={{
+                  marginTop: '1rem', padding: '12px 16px',
+                  background: 'rgba(255,77,109,.08)',
+                  border: '1px solid rgba(255,77,109,.3)',
+                  borderRadius: 10, fontSize: 13,
+                  color: '#ff4d6d', fontWeight: 500,
+                }}>
+                  {scanErreur}
+                </div>
+              )}
+
+              {/* Aucun événement sélectionné */}
+              {!evScan && (
+                <div className="orga-qr-zone">
+                  <div className="orga-qr-icon">
+                    <svg viewBox="0 0 100 100" width="80" height="80" fill="none" stroke="currentColor" strokeWidth="3">
+                      <rect x="10" y="10" width="30" height="30" rx="2" />
+                      <rect x="60" y="10" width="30" height="30" rx="2" />
+                      <rect x="10" y="60" width="30" height="30" rx="2" />
+                      <rect x="17" y="17" width="16" height="16" fill="currentColor" opacity="0.3" />
+                      <rect x="67" y="17" width="16" height="16" fill="currentColor" opacity="0.3" />
+                      <rect x="17" y="67" width="16" height="16" fill="currentColor" opacity="0.3" />
+                    </svg>
+                  </div>
+                  <p className="orga-qr-hint">Sélectionnez un événement publié ci-dessus</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </main>
       {qrModal && <QRModal token={qrModal.token} titre={qrModal.titre} qr_utilise={qrModal.qr_utilise} onClose={() => setQrModal(null)} />}
+
+      {/* ── MODAL ANNULATION ÉVÉNEMENT (admin) ── */}
+      {modalAnnulerEv && (
+        <div className="dash-overlay" onClick={() => setModalAnnulerEv(null)}>
+          <div className="dash-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="dash-modal__header">
+              <h3>Annuler l'événement</h3>
+              <button className="dash-modal__close" onClick={() => setModalAnnulerEv(null)}>✕</button>
+            </div>
+            <div style={{ padding: '0 1.5rem 1rem' }}>
+              <p style={{ color: '#8888aa', fontSize: 13, marginBottom: 16 }}>
+                Vous êtes sur le point d'annuler <strong style={{ color: '#e8e8f0' }}>"{modalAnnulerEv.title_event}"</strong>.
+                Tous les participants inscrits seront notifiés automatiquement.
+              </p>
+              <form onSubmit={confirmerAnnulationEv}>
+                <div className="form-group">
+                  <label style={{ color: '#e8e8f0', fontSize: 13 }}>Raison de l'annulation *</label>
+                  <textarea rows={4}
+                    value={raisonAnnulEv}
+                    onChange={e => setRaisonAnnulEv(e.target.value)}
+                    placeholder="Ex : Terrain indisponible suite aux intempéries, report à une date ultérieure..."
+                    style={{ background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 8, padding: '10px 12px', width: '100%', fontFamily: 'Poppins,sans-serif', resize: 'vertical', boxSizing: 'border-box' }}
+                    required />
+                </div>
+                {/* Prévisualisation du message participants */}
+                {raisonAnnulEv.trim() && (
+                  <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(255,77,109,.08)', border: '1px solid rgba(255,77,109,.2)', borderRadius: 8, fontSize: 12, color: '#8888aa' }}>
+                    <strong style={{ color: '#ff4d6d', display: 'block', marginBottom: 4 }}>Message envoyé aux participants :</strong>
+                    L'événement "{modalAnnulerEv.title_event}" a été annulé. Raison : {raisonAnnulEv.trim()}. Nous vous présentons nos excuses pour la gêne occasionnée.
+                  </div>
+                )}
+                <div className="dash-modal__footer">
+                  <button type="submit" style={{
+                    padding: '10px 20px', background: 'rgba(255,77,109,.2)', color: '#ff4d6d',
+                    border: '1px solid rgba(255,77,109,.5)', borderRadius: 8, cursor: 'pointer',
+                    fontFamily: 'Poppins,sans-serif', fontWeight: 600, fontSize: 14,
+                  }} disabled={savingAnnulEv}>
+                    {savingAnnulEv ? 'Annulation...' : '✕ Confirmer l\'annulation'}
+                  </button>
+                  <button type="button" className="dash-btn-ghost" onClick={() => setModalAnnulerEv(null)}>
+                    Retour
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL REFUS DE MODIFICATION ── */}
+      {refusModifId && (
+        <div className="dash-overlay" onClick={() => setRefusModifId(null)}>
+          <div className="dash-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div className="dash-modal__header">
+              <h3>Refuser la modification</h3>
+              <button className="dash-modal__close" onClick={() => setRefusModifId(null)}>✕</button>
+            </div>
+            <div style={{ padding: '0 1.5rem 1rem' }}>
+              <p style={{ color: '#8888aa', fontSize: 13, marginBottom: 16 }}>
+                Expliquez au créateur pourquoi sa modification est refusée.
+                Il recevra cette raison dans sa notification.
+              </p>
+              <form onSubmit={refuserModif}>
+                <div className="form-group">
+                  <label style={{ color: '#e8e8f0', fontSize: 13 }}>Raison du refus *</label>
+                  <textarea rows={3}
+                    value={raisonRefus}
+                    onChange={e => setRaisonRefus(e.target.value)}
+                    placeholder="Ex : Les nouvelles dates entrent en conflit avec un autre événement..."
+                    style={{ background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 8, padding: '10px 12px', width: '100%', fontFamily: 'Poppins,sans-serif', resize: 'vertical', boxSizing: 'border-box' }}
+                    required />
+                </div>
+                <div className="dash-modal__footer">
+                  <button type="submit" style={{
+                    padding: '10px 20px', background: 'rgba(255,77,109,.2)', color: '#ff4d6d',
+                    border: '1px solid rgba(255,77,109,.5)', borderRadius: 8, cursor: 'pointer',
+                    fontFamily: 'Poppins,sans-serif', fontWeight: 600, fontSize: 14,
+                  }} disabled={savingModifAction}>
+                    {savingModifAction ? 'Envoi...' : '✕ Confirmer le refus'}
+                  </button>
+                  <button type="button" className="dash-btn-ghost" onClick={() => setRefusModifId(null)}>
+                    Annuler
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

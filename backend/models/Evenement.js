@@ -85,7 +85,52 @@ const evenementSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
         // true dès que le cron a envoyé le rappel aux participants
-    }
+    },
+
+    // ── Modification en attente de validation ─────────────────
+    // true = un créateur (rôle user) a soumis une modification
+    // Un organisateur ou admin doit approuver ou refuser avant
+    // que les changements soient appliqués à l'événement réel.
+    modification_en_attente: {
+        type: Boolean,
+        default: false,
+    },
+
+    // Snapshot des nouvelles valeurs proposées par le créateur.
+    // Affiché en "avant / après" dans le dashboard orga/admin.
+    // Vidé après approbation ou refus.
+    modification_proposee: {
+        titre:            { type: String,  default: null },
+        description:      { type: String,  default: null },
+        ev_start_time:    { type: Date,    default: null },
+        ev_end_time:      { type: Date,    default: null },
+        max_participants: { type: Number,  default: null },
+        location: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Location',
+            default: null,
+        },
+        categories: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Categorie',
+        }],
+        // Qui a proposé la modification et quand
+        proposee_par: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Utilisateur',
+            default: null,
+        },
+        proposee_le: { type: Date, default: null },
+    },
+
+    // ── Annulation ────────────────────────────────────────────
+    // Raison obligatoire quand stat_event passe à 'annulé'.
+    // Affichée dans le badge "Annulé" côté frontend et dans
+    // la notification envoyée aux participants.
+    raison_annulation: {
+        type: String,
+        default: null,
+    },
 
 }, {
     collection: 'evenements',

@@ -1,3 +1,15 @@
+// ============================================================
+// MonEspaceModal.jsx — Modal "Mon compte"
+// Tabs : Mes informations | Mot de passe
+//
+// SECTION PRÉFÉRENCES SPORTIVES (onglet infos) :
+//   Mode affichage : chips colorés des sports déjà choisis
+//                    + bouton "Modifier" pour entrer en mode édition
+//                    + bouton "Suggérer un sport absent"
+//   Mode édition   : grille toggle complète des sports disponibles
+//   Formulaire suggestion : envoie POST /api/categories/suggerer
+// ============================================================
+
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../api';
 
@@ -14,9 +26,17 @@ const MonEspaceModal = ({ utilisateur, onClose, onUpdate }) => {
   const fileInputRef = useRef(null);
   const [savingInfos, setSavingInfos] = useState(false);
 
-  const [categories, setCategories] = useState([]);
+  const [categories, setCategories]     = useState([]);
   const [selectedCats, setSelectedCats] = useState(new Set());
-  const [loadingCats, setLoadingCats] = useState(true);
+  const [loadingCats, setLoadingCats]   = useState(true);
+
+  // ── États mode édition préférences ──────────────────────
+  const [editPrefs, setEditPrefs]       = useState(false);
+
+  // ── États formulaire suggestion ──────────────────────────
+  const [showSuggestion, setShowSuggestion] = useState(false);
+  const [suggForm, setSuggForm]  = useState({ event_categ: '', event_type: '', raison: '' });
+  const [savingSugg, setSavingSugg] = useState(false);
 
   const [mdp, setMdp] = useState({ ancien: '', nouveau: '', confirmer: '' });
   const [savingMdp, setSavingMdp] = useState(false);
@@ -83,7 +103,7 @@ const MonEspaceModal = ({ utilisateur, onClose, onUpdate }) => {
     });
   };
 
-  // Regrouper les catégories par event_categ
+  // Regrouper les catégories par event_categ pour la grille d'édition
   const grouped = categories.reduce((acc, cat) => {
     const key = cat.event_categ || 'Autre';
     if (!acc[key]) acc[key] = [];
@@ -91,11 +111,13 @@ const MonEspaceModal = ({ utilisateur, onClose, onUpdate }) => {
     return acc;
   }, {});
 
+  // Sports choisis avec leur détail (pour l'affichage en chips)
+  const sportsChoisis = categories.filter(c => selectedCats.has(c._id));
+
   const sauvegarderInfos = async (e) => {
     e.preventDefault();
     setSavingInfos(true);
     try {
-      // Si nouvelle image base64 → upload vers Cloudinary d'abord
       let photoUrl = form.photo;
       if (form.photo && form.photo.startsWith('data:image')) {
         const uploadRes = await api.post('/utilisateurs/upload-photo', { image: form.photo });
@@ -117,11 +139,36 @@ const MonEspaceModal = ({ utilisateur, onClose, onUpdate }) => {
       const stored = { ...utilisateur, ...updated };
       localStorage.setItem('event_user', JSON.stringify(stored));
       onUpdate(stored);
+      setEditPrefs(false);
       flash('success', 'Profil et préférences mis à jour');
     } catch {
       flash('error', 'Erreur lors de la mise à jour');
     } finally {
       setSavingInfos(false);
+    }
+  };
+
+  // ── Soumettre une suggestion de nouveau sport ────────────
+  const soumettresuggestion = async (e) => {
+    e.preventDefault();
+    if (!suggForm.event_categ.trim() || !suggForm.event_type.trim()) {
+      flash('error', 'Groupe et nom du sport obligatoires');
+      return;
+    }
+    setSavingSugg(true);
+    try {
+      const res = await api.post('/categories/suggerer', {
+        event_categ:       suggForm.event_categ.trim(),
+        event_type:        suggForm.event_type.trim(),
+        raison_suggestion: suggForm.raison.trim(),
+      });
+      flash('success', res.data.message);
+      setSuggForm({ event_categ: '', event_type: '', raison: '' });
+      setShowSuggestion(false);
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur lors de la suggestion');
+    } finally {
+      setSavingSugg(false);
     }
   };
 
@@ -152,9 +199,9 @@ const MonEspaceModal = ({ utilisateur, onClose, onUpdate }) => {
 
   const initials = `${utilisateur?.first_name?.[0] || ''}${utilisateur?.last_name?.[0] || ''}`;
   const roleColor = {
-    admin: { bg: 'rgba(255,77,109,.15)', color: '#ff4d6d', border: 'rgba(255,77,109,.3)' },
-    organisateur: { bg: 'rgba(255,107,0,.15)', color: '#ff6b00', border: 'rgba(255,107,0,.3)' },
-    user: { bg: 'rgba(0,212,255,.1)', color: '#00d4ff', border: 'rgba(0,212,255,.2)' },
+    admin:        { bg: 'rgba(255,77,109,.15)',  color: '#ff4d6d', border: 'rgba(255,77,109,.3)' },
+    organisateur: { bg: 'rgba(255,107,0,.15)',   color: '#ff6b00', border: 'rgba(255,107,0,.3)' },
+    user:         { bg: 'rgba(0,212,255,.1)',    color: '#00d4ff', border: 'rgba(0,212,255,.2)' },
   }[utilisateur?.role] || { bg: 'rgba(0,212,255,.1)', color: '#00d4ff', border: 'rgba(0,212,255,.2)' };
 
   return (
@@ -252,29 +299,21 @@ const MonEspaceModal = ({ utilisateur, onClose, onUpdate }) => {
                       : <span style={{ opacity: 0.4 }}>👤</span>}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
-                      onChange={handlePhotoChange}
-                    />
-                    <button type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      style={{
-                        padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
-                        background: 'rgba(0,212,255,.1)', color: '#00d4ff',
-                        border: '1px solid rgba(0,212,255,.3)', fontFamily: 'Poppins,sans-serif',
-                      }}>
+                    <input ref={fileInputRef} type="file" accept="image/*"
+                      style={{ display: 'none' }} onChange={handlePhotoChange} />
+                    <button type="button" onClick={() => fileInputRef.current?.click()} style={{
+                      padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
+                      background: 'rgba(0,212,255,.1)', color: '#00d4ff',
+                      border: '1px solid rgba(0,212,255,.3)', fontFamily: 'Poppins,sans-serif',
+                    }}>
                       Choisir une image
                     </button>
                     {photoPreview && (
-                      <button type="button" onClick={removePhoto}
-                        style={{
-                          padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
-                          background: 'transparent', color: '#ff4d6d',
-                          border: '1px solid rgba(255,77,109,.3)', fontFamily: 'Poppins,sans-serif',
-                        }}>
+                      <button type="button" onClick={removePhoto} style={{
+                        padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
+                        background: 'transparent', color: '#ff4d6d',
+                        border: '1px solid rgba(255,77,109,.3)', fontFamily: 'Poppins,sans-serif',
+                      }}>
                         Supprimer
                       </button>
                     )}
@@ -305,56 +344,167 @@ const MonEspaceModal = ({ utilisateur, onClose, onUpdate }) => {
                   placeholder="+216 XX XXX XXX" />
               </div>
 
-              {/* Préférences sportives */}
+              {/* ── PRÉFÉRENCES SPORTIVES ── */}
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: 12, color: '#8888aa', marginBottom: 8 }}>
-                  Mes préférences sportives
-                </label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <label style={{ fontSize: 12, color: '#8888aa' }}>
+                    Mes préférences sportives
+                  </label>
+                  {/* Bouton pour basculer entre affichage et édition */}
+                  {!editPrefs && (
+                    <button type="button" onClick={() => setEditPrefs(true)} style={{
+                      padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 6,
+                      background: 'rgba(0,212,255,.08)', color: '#00d4ff',
+                      border: '1px solid rgba(0,212,255,.25)', fontFamily: 'Poppins,sans-serif',
+                    }}>
+                      ✏️ Modifier
+                    </button>
+                  )}
+                  {editPrefs && (
+                    <button type="button" onClick={() => setEditPrefs(false)} style={{
+                      padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 6,
+                      background: 'transparent', color: '#8888aa',
+                      border: '1px solid #2a2a4a', fontFamily: 'Poppins,sans-serif',
+                    }}>
+                      ✕ Fermer
+                    </button>
+                  )}
+                </div>
+
                 {loadingCats ? (
                   <p style={{ fontSize: 12, color: '#555577' }}>Chargement...</p>
-                ) : categories.length === 0 ? (
-                  <p style={{ fontSize: 12, color: '#555577' }}>Aucune catégorie disponible.</p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {Object.entries(grouped).map(([groupName, cats]) => (
-                      <div key={groupName}>
-                        <div style={{ fontSize: 11, color: '#8888aa', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                          {groupName}
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          {cats.map(cat => {
-                            const active = selectedCats.has(cat._id);
-                            return (
-                              <button
-                                key={cat._id}
-                                type="button"
-                                onClick={() => toggleCat(cat._id)}
-                                style={{
-                                  padding: '4px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 20,
-                                  fontFamily: 'Poppins,sans-serif', transition: 'all .15s',
-                                  background: active ? 'rgba(0,212,255,.15)' : 'transparent',
-                                  color: active ? '#00d4ff' : '#666688',
-                                  border: `1px solid ${active ? '#00d4ff' : '#2a2a4a'}`,
-                                  fontWeight: active ? 600 : 400,
-                                }}
-                              >
-                                {active ? '✓ ' : ''}{cat.event_type || cat.event_categ}
-                              </button>
-                            );
-                          })}
+                  <>
+                    {/* ── MODE AFFICHAGE : chips des sports choisis ── */}
+                    {!editPrefs && (
+                      <div>
+                        {sportsChoisis.length === 0 ? (
+                          <p style={{ fontSize: 12, color: '#555577', fontStyle: 'italic' }}>
+                            Aucune préférence ajoutée. Cliquez sur "Modifier" pour en choisir.
+                          </p>
+                        ) : (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {sportsChoisis.map(cat => (
+                              <span key={cat._id} style={{
+                                padding: '4px 12px', fontSize: 12, borderRadius: 20, fontWeight: 600,
+                                background: 'rgba(0,212,255,.15)', color: '#00d4ff',
+                                border: '1px solid rgba(0,212,255,.3)',
+                              }}>
+                                ✓ {cat.event_type || cat.event_categ}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ── MODE ÉDITION : grille toggle complète ── */}
+                    {editPrefs && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
+                        {categories.length === 0 ? (
+                          <p style={{ fontSize: 12, color: '#555577' }}>Aucune catégorie disponible.</p>
+                        ) : (
+                          Object.entries(grouped).map(([groupName, cats]) => (
+                            <div key={groupName}>
+                              <div style={{ fontSize: 11, color: '#8888aa', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                {groupName}
+                              </div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                {cats.map(cat => {
+                                  const active = selectedCats.has(cat._id);
+                                  return (
+                                    <button key={cat._id} type="button" onClick={() => toggleCat(cat._id)} style={{
+                                      padding: '4px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 20,
+                                      fontFamily: 'Poppins,sans-serif', transition: 'all .15s',
+                                      background: active ? 'rgba(0,212,255,.15)' : 'transparent',
+                                      color: active ? '#00d4ff' : '#666688',
+                                      border: `1px solid ${active ? '#00d4ff' : '#2a2a4a'}`,
+                                      fontWeight: active ? 600 : 400,
+                                    }}>
+                                      {active ? '✓ ' : ''}{cat.event_type || cat.event_categ}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {/* ── BOUTON SUGGESTION ── */}
+                    <button type="button"
+                      onClick={() => setShowSuggestion(s => !s)}
+                      style={{
+                        marginTop: 8, padding: '4px 12px', fontSize: 11, cursor: 'pointer',
+                        borderRadius: 6, fontFamily: 'Poppins,sans-serif',
+                        background: showSuggestion ? 'rgba(167,139,250,.1)' : 'transparent',
+                        color: '#a78bfa', border: '1px solid rgba(167,139,250,.3)',
+                      }}>
+                      💡 {showSuggestion ? 'Annuler la suggestion' : 'Suggérer un sport absent de la liste'}
+                    </button>
+
+                    {/* ── FORMULAIRE SUGGESTION ── */}
+                    {showSuggestion && (
+                      <div style={{
+                        marginTop: 10, padding: '12px 14px',
+                        background: 'rgba(167,139,250,.05)',
+                        border: '1px solid rgba(167,139,250,.2)',
+                        borderRadius: 10,
+                      }}>
+                        <p style={{ fontSize: 12, color: '#8888aa', marginBottom: 10 }}>
+                          Votre suggestion sera examinée par l'équipe. Si elle est acceptée, elle apparaîtra dans la liste pour tous les utilisateurs.
+                        </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: 11, color: '#8888aa', display: 'block', marginBottom: 4 }}>
+                                Groupe * <span style={{ color: '#555' }}>(ex: Sport collectif)</span>
+                              </label>
+                              <input type="text" value={suggForm.event_categ}
+                                onChange={e => setSuggForm({ ...suggForm, event_categ: e.target.value })}
+                                placeholder="Sport collectif"
+                                style={{ width: '100%', background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12, boxSizing: 'border-box' }} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ fontSize: 11, color: '#8888aa', display: 'block', marginBottom: 4 }}>
+                                Sport * <span style={{ color: '#555' }}>(ex: Volleyball)</span>
+                              </label>
+                              <input type="text" value={suggForm.event_type}
+                                onChange={e => setSuggForm({ ...suggForm, event_type: e.target.value })}
+                                placeholder="Volleyball"
+                                style={{ width: '100%', background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12, boxSizing: 'border-box' }} />
+                            </div>
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 11, color: '#8888aa', display: 'block', marginBottom: 4 }}>
+                              Pourquoi ce sport ? <span style={{ color: '#555' }}>(optionnel)</span>
+                            </label>
+                            <textarea rows={2} value={suggForm.raison}
+                              onChange={e => setSuggForm({ ...suggForm, raison: e.target.value })}
+                              placeholder="Il y a beaucoup de joueurs dans ma région..."
+                              style={{ width: '100%', background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12, resize: 'none', boxSizing: 'border-box' }} />
+                          </div>
+                          <button type="button" onClick={soumettresuggestion} disabled={savingSugg} style={{
+                            padding: '7px 16px', background: 'rgba(167,139,250,.2)', color: '#a78bfa',
+                            border: '1px solid rgba(167,139,250,.4)', borderRadius: 6, cursor: 'pointer',
+                            fontFamily: 'Poppins,sans-serif', fontSize: 12, fontWeight: 600, alignSelf: 'flex-start',
+                          }}>
+                            {savingSugg ? 'Envoi...' : '📨 Envoyer la suggestion'}
+                          </button>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 )}
               </div>
 
               {/* Stats lecture seule */}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '1rem' }}>
                 {[
-                  { label: 'Points', value: utilisateur?.cumul_points || 0, color: '#00d4ff' },
-                  { label: 'Heures', value: `${utilisateur?.cumul_heures_participation || 0}h`, color: '#00e676' },
-                  { label: 'Fiabilité', value: `${utilisateur?.reliabilite_score ?? 100}%`, color: '#ffd700' },
+                  { label: 'Points',    value: utilisateur?.cumul_points || 0,                   color: '#00d4ff' },
+                  { label: 'Heures',    value: `${utilisateur?.cumul_heures_participation || 0}h`, color: '#00e676' },
+                  { label: 'Fiabilité', value: `${utilisateur?.reliabilite_score ?? 100}%`,        color: '#ffd700' },
                 ].map(s => (
                   <div key={s.label} style={{
                     flex: 1, background: '#0a0a1a', borderRadius: 8, padding: '8px', textAlign: 'center',

@@ -12,6 +12,7 @@ const cron = require('node-cron');
 const Evenement     = require('../models/Evenement');
 const Participation = require('../models/Participation');
 const Notification  = require('../models/Notification');
+const { terminerEvenementsExpires } = require('../controllers/evenementController');
 
 const FENETRE_MIN = 105; // 1h45
 const FENETRE_MAX = 135; // 2h15
@@ -71,7 +72,7 @@ async function envoyerRappels() {
 }
 
 function demarrerCron() {
-    // Toutes les 15 minutes
+    // Tâche 1 : rappels 2h avant chaque événement
     cron.schedule('*/15 * * * *', async () => {
         try {
             await envoyerRappels();
@@ -80,7 +81,17 @@ function demarrerCron() {
         }
     });
 
-    console.log('⏱  Cron rappels événements démarré (toutes les 15 min)');
+    // Tâche 2 : passer en "terminé" les événements dont ev_end_time est dépassé.
+    // Exécutée toutes les 15 min en même temps que les rappels.
+    cron.schedule('*/15 * * * *', async () => {
+        try {
+            await terminerEvenementsExpires();
+        } catch (err) {
+            console.error('❌ Erreur cron terminé:', err.message);
+        }
+    });
+
+    console.log('⏱  Cron démarré : rappels + clôture automatique (toutes les 15 min)');
 }
 
 module.exports = { demarrerCron };

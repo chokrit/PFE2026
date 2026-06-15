@@ -10,6 +10,8 @@ import MonEspaceModal from '../../components/dashboard/MonEspaceModal';
 import NotificationBell from '../../components/dashboard/NotificationBell';
 import '../../styles/dashboard/dashboard.css';
 import '../../styles/dashboard/organisateur.css';
+import { fmtDate, fmtHeure, fmtDateHeure } from '../../utils/dates';
+import GalerieModal from '../../components/dashboard/GalerieModal';
 
 const mkDates = () => {
   const p = n => String(n).padStart(2, '0');
@@ -21,11 +23,12 @@ const mkDates = () => {
 
 const DashboardOrganisateur = () => {
     const navigate = useNavigate();
-    const { isRTL } = useLanguage();
+    const { isRTL, langue, setLangue, t } = useLanguage();
 
     const [organisateur, setOrganisateur] = useState(null);
     const [mesEvents, setMesEvents] = useState([]);
     const [activeTab, setActiveTab] = useState('mes-events');
+    const [galerieOpen, setGalerieOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [notification, setNotification] = useState(null);
 
@@ -40,7 +43,7 @@ const DashboardOrganisateur = () => {
     const [participants, setParticipants] = useState([]);
 
     const [profilForm, setProfilForm] = useState({
-        first_name: '', last_name: '', telephone: '', sexe: '', langue: 'fr',
+        first_name: '', last_name: '', telephone: '', langue: 'fr',
     });
     const [savingProfil, setSavingProfil] = useState(false);
 
@@ -89,6 +92,10 @@ const DashboardOrganisateur = () => {
     const [refusModifId, setRefusModifId]         = useState(null);
     const [raisonRefus, setRaisonRefus]           = useState('');
     const [savingModifAction, setSavingModifAction] = useState(false);
+    // Annulations soumises par les créateurs
+    const [refusAnnulId, setRefusAnnulId]         = useState(null);
+    const [raisonRefusAnnul, setRaisonRefusAnnul] = useState('');
+    const [savingAnnulAction, setSavingAnnulAction] = useState(false);
 
     useEffect(() => {
         const token = localStorage.getItem('event_token');
@@ -102,8 +109,7 @@ const DashboardOrganisateur = () => {
                 first_name: u.first_name || '',
                 last_name: u.last_name || '',
                 telephone: u.telephone || '',
-                sexe: u.sexe || '',
-                langue: u.langue || 'fr',
+                langue: langue, // utilise la valeur du contexte déjà résolue
             });
         }
         chargerMesEvents();
@@ -201,6 +207,7 @@ const DashboardOrganisateur = () => {
             const stored = { ...organisateur, ...updated };
             localStorage.setItem('event_user', JSON.stringify(stored));
             setOrganisateur(stored);
+            setLangue(profilForm.langue); // synchronise le contexte si l'utilisateur a changé sa langue
             notif('success', 'Profil mis à jour');
         } catch {
             notif('error', 'Erreur mise à jour profil');
@@ -447,6 +454,34 @@ const DashboardOrganisateur = () => {
         }
     };
 
+    // ── Approuver une demande d'annulation ──────────────────────
+    const approuverAnnul = async (eventId) => {
+        setSavingAnnulAction(true);
+        try {
+            const res = await api.post(`/evenements/${eventId}/approuver-annulation`);
+            notif('success', res.data.message);
+            chargerMesEvents();
+        } catch (err) {
+            notif('error', err.response?.data?.message || 'Erreur approbation');
+        } finally { setSavingAnnulAction(false); }
+    };
+
+    // ── Refuser une demande d'annulation ─────────────────────────
+    const refuserAnnul = async (e) => {
+        e.preventDefault();
+        if (!raisonRefusAnnul.trim()) { notif('error', 'La raison est obligatoire'); return; }
+        setSavingAnnulAction(true);
+        try {
+            const res = await api.post(`/evenements/${refusAnnulId}/refuser-annulation`, { raison: raisonRefusAnnul.trim() });
+            notif('success', res.data.message);
+            setRefusAnnulId(null);
+            setRaisonRefusAnnul('');
+            chargerMesEvents();
+        } catch (err) {
+            notif('error', err.response?.data?.message || 'Erreur refus');
+        } finally { setSavingAnnulAction(false); }
+    };
+
     const getStatutColor = (s) => ({
         'publié': '#00e676', 'brouillon': '#ff6b00', 'annulé': '#ff4d6d', 'terminé': '#888'
     }[s] || '#888');
@@ -510,40 +545,50 @@ const DashboardOrganisateur = () => {
                         👤 Mon compte
                     </button>
                     <span className="dash-username">{organisateur?.first_name}</span>
+                    <button
+                        className="dash-btn-ghost"
+                        onClick={() => setGalerieOpen(true)}
+                        title="Galerie photos"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                        📸 Galerie
+                    </button>
                     <button className="dash-btn-logout" onClick={() => { localStorage.clear(); navigate('/login'); }}>
                         Déconnexion
                     </button>
                 </div>
             </header>
 
+            {galerieOpen && <GalerieModal onClose={() => setGalerieOpen(false)} isAdmin={false} />}
+
             <main className="dash-main">
 
                 <div className="dash-stats-grid" style={{ marginBottom: '1.5rem' }}>
-                    <StatCard label="Mes événements" value={mesEvents.length} icon="🏟" color="#00d4ff" />
-                    <StatCard label="Total inscrits" value={totalInscrits} icon="👥" color="#00e676" />
-                    <StatCard label="Points" value={organisateur?.cumul_points || 0} icon="⭐" color="#ff6b00" />
-                    <StatCard label="Fiabilité" value={`${organisateur?.reliabilite_score ?? 100}%`} icon="📊" color="#ffd700" />
+                    <StatCard label={t('myEvents')} value={mesEvents.length} icon="🏟" color="#00d4ff" />
+                    <StatCard label={t('participants')} value={totalInscrits} icon="👥" color="#00e676" />
+                    <StatCard label={t('totalPoints')} value={organisateur?.cumul_points || 0} icon="⭐" color="#ff6b00" />
+                    <StatCard label={t('reliability')} value={`${organisateur?.reliabilite_score ?? 100}%`} icon="📊" color="#ffd700" />
                 </div>
 
                 <div className="dash-tabs" style={{ marginBottom: '1.5rem' }}>
                     {[
-                        { key: 'mes-events',       label: 'Mes événements' },
-                        { key: 'scanner',          label: '📷 QR Code' },
-                        { key: 'participants',     label: 'Participants' },
-                        { key: 'categories',       label: '🏷 Catégories', badge: suggestionsCats.length + suggestionLieux.length },
-                        { key: 'explorer',         label: '🔍 Explorer' },
-                        { key: 'mes-inscriptions', label: 'Mes inscriptions', badge: mesInscriptions.length },
-                        { key: 'recompenses',      label: '🎫 Récompenses',  badge: mesRecompenses.filter(r => !r.is_redeemed).length },
-                        { key: 'profil',           label: 'Mon profil' },
-                    ].map(t => (
+                        { key: 'mes-events',       label: t('myEvents') },
+                        { key: 'scanner',          label: `📷 ${t('scanner')}` },
+                        { key: 'participants',     label: t('participants') },
+                        { key: 'categories',       label: `🏷 ${t('categories')}`, badge: suggestionsCats.length + suggestionLieux.length },
+                        { key: 'explorer',         label: `🔍 ${t('explore')}` },
+                        { key: 'mes-inscriptions', label: t('myRegistrations'), badge: mesInscriptions.length },
+                        { key: 'recompenses',      label: `🎫 ${t('rewards')}`,  badge: mesRecompenses.filter(r => !r.is_redeemed).length },
+                        { key: 'profil',           label: t('myProfile') },
+                    ].map(tab => (
                         <button
-                            key={t.key}
-                            className={`dash-tab ${activeTab === t.key ? 'active' : ''}`}
-                            onClick={() => setActiveTab(t.key)}
+                            key={tab.key}
+                            className={`dash-tab ${activeTab === tab.key ? 'active' : ''}`}
+                            onClick={() => setActiveTab(tab.key)}
                         >
-                            {t.label}
-                            {t.badge > 0 && (
-                                <span className="dash-tab-badge">{t.badge}</span>
+                            {tab.label}
+                            {tab.badge > 0 && (
+                                <span className="dash-tab-badge">{tab.badge}</span>
                             )}
                         </button>
                     ))}
@@ -624,10 +669,10 @@ const DashboardOrganisateur = () => {
                                                 <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
                                                     <input placeholder="Nom du lieu *" value={suggLieuNom}
                                                         onChange={e => setSuggLieuNom(e.target.value)}
-                                                        style={{ flex: 2, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                                                        style={{ flex: 2, background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
                                                     <input placeholder="Capacité (optionnel)" type="number" min="0" value={suggLieuCap}
                                                         onChange={e => setSuggLieuCap(e.target.value)}
-                                                        style={{ flex: 1, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                                                        style={{ flex: 1, background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
                                                 </div>
                                                 <div style={{ display: 'flex', gap: 6 }}>
                                                     <button type="button" onClick={soumettreSuggLieu} disabled={savingSuggLieu}
@@ -664,10 +709,10 @@ const DashboardOrganisateur = () => {
                                                 <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
                                                     <input placeholder="Groupe (ex: Aquatique)" value={suggCatForm.event_categ}
                                                         onChange={e => setSuggCatForm(p => ({ ...p, event_categ: e.target.value }))}
-                                                        style={{ flex: 1, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                                                        style={{ flex: 1, background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
                                                     <input placeholder="Sport (ex: Natation)" value={suggCatForm.event_type}
                                                         onChange={e => setSuggCatForm(p => ({ ...p, event_type: e.target.value }))}
-                                                        style={{ flex: 1, background: '#0a0a1a', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                                                        style={{ flex: 1, background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
                                                 </div>
                                                 <div style={{ display: 'flex', gap: 6 }}>
                                                     <button type="button" onClick={soumettreSuggCat} disabled={savingSuggCat}
@@ -732,7 +777,7 @@ const DashboardOrganisateur = () => {
                                                 {ev.modification_proposee?.titre && <div style={{ fontSize: 12, color: '#8888aa' }}>Titre : {ev.title_event}</div>}
                                                 {ev.modification_proposee?.ev_start_time && (
                                                     <div style={{ fontSize: 12, color: '#8888aa' }}>
-                                                        Début : {new Date(ev.ev_start_time).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                        Début : {fmtDateHeure(ev.ev_start_time)}
                                                     </div>
                                                 )}
                                                 {ev.modification_proposee?.max_participants && <div style={{ fontSize: 12, color: '#8888aa' }}>Participants max : {ev.max_participants}</div>}
@@ -742,7 +787,7 @@ const DashboardOrganisateur = () => {
                                                 {ev.modification_proposee?.titre && <div style={{ fontSize: 12, color: '#e8e8f0' }}>Titre : {ev.modification_proposee.titre}</div>}
                                                 {ev.modification_proposee?.ev_start_time && (
                                                     <div style={{ fontSize: 12, color: '#e8e8f0' }}>
-                                                        Début : {new Date(ev.modification_proposee.ev_start_time).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                        Début : {fmtDateHeure(ev.modification_proposee.ev_start_time)}
                                                     </div>
                                                 )}
                                                 {ev.modification_proposee?.max_participants && <div style={{ fontSize: 12, color: '#e8e8f0' }}>Participants max : {ev.modification_proposee.max_participants}</div>}
@@ -771,6 +816,61 @@ const DashboardOrganisateur = () => {
                             </div>
                         )}
 
+                        {/* ── Annulations en attente de confirmation ── */}
+                        {mesEvents.filter(e => e.annulation_en_attente).length > 0 && (
+                            <div style={{ marginBottom: 20, padding: '14px 16px', background: 'rgba(255,77,109,.06)', border: '1px solid rgba(255,77,109,.25)', borderRadius: 12 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: '#ff4d6d', marginBottom: 12 }}>
+                                    ⚠️ Demandes d'annulation en attente ({mesEvents.filter(e => e.annulation_en_attente).length})
+                                </div>
+                                {mesEvents.filter(e => e.annulation_en_attente).map(ev => (
+                                    <div key={ev._id} style={{ background: '#0a0a1a', borderRadius: 10, padding: '12px 14px', marginBottom: 10 }}>
+                                        <div style={{ fontSize: 14, fontWeight: 600, color: '#e8e8f0', marginBottom: 4 }}>{ev.title_event}</div>
+                                        <div style={{ fontSize: 12, color: '#8888aa', marginBottom: 8 }}>
+                                            Demandé par : {ev.createur?.first_name} {ev.createur?.last_name}
+                                            {ev.annulation_proposee?.proposee_le && (
+                                                <span> · {new Date(ev.annulation_proposee.proposee_le).toLocaleDateString('fr-FR')}</span>
+                                            )}
+                                        </div>
+                                        {ev.annulation_proposee?.raison && (
+                                            <div style={{ padding: '6px 10px', background: 'rgba(255,77,109,.08)', border: '1px solid rgba(255,77,109,.2)', borderRadius: 6, fontSize: 12, color: '#ff9999', marginBottom: 10 }}>
+                                                Raison : {ev.annulation_proposee.raison}
+                                            </div>
+                                        )}
+                                        {refusAnnulId === ev._id ? (
+                                            <form onSubmit={refuserAnnul} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Raison du refus *"
+                                                    value={raisonRefusAnnul}
+                                                    onChange={e => setRaisonRefusAnnul(e.target.value)}
+                                                    style={{ flex: 1, minWidth: 200, background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }}
+                                                    required />
+                                                <button type="submit" disabled={savingAnnulAction}
+                                                    style={{ padding: '6px 14px', background: 'rgba(255,77,109,.2)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                                                    {savingAnnulAction ? '...' : 'Confirmer le refus'}
+                                                </button>
+                                                <button type="button" onClick={() => { setRefusAnnulId(null); setRaisonRefusAnnul(''); }}
+                                                    style={{ padding: '6px 10px', background: 'transparent', color: '#8888aa', border: '1px solid #2a2a4a', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                                                    Annuler
+                                                </button>
+                                            </form>
+                                        ) : (
+                                            <div style={{ display: 'flex', gap: 8 }}>
+                                                <button onClick={() => approuverAnnul(ev._id)} disabled={savingAnnulAction}
+                                                    style={{ padding: '6px 14px', background: 'rgba(255,77,109,.15)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                                                    ✓ Confirmer l'annulation
+                                                </button>
+                                                <button onClick={() => { setRefusAnnulId(ev._id); setRaisonRefusAnnul(''); }}
+                                                    style={{ padding: '6px 14px', background: 'rgba(0,230,118,.12)', color: '#00e676', border: '1px solid rgba(0,230,118,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                                                    ✕ Refuser (garder l'événement)
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
                         {/* ── Liste filtrée ── */}
                         {(() => {
                             const filtreStatuts = filtreMesEvents === 'actifs'
@@ -792,7 +892,7 @@ const DashboardOrganisateur = () => {
                                             <div className="orga-event-row__info">
                                                 <div className="orga-event-row__title">{ev.title_event}</div>
                                                 <div className="orga-event-row__meta">
-                                                    <span>{new Date(ev.ev_start_time).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                                                    <span>{fmtDate(ev.ev_start_time)}</span>
                                                     <span>·</span>
                                                     <span>{ev.lieu || 'Lieu non défini'}</span>
                                                     <span>·</span>
@@ -809,6 +909,12 @@ const DashboardOrganisateur = () => {
                                                     {ev.modification_en_attente && (
                                                         <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: 'rgba(245,158,11,.15)', color: '#f59e0b' }}>
                                                             ⏳ Modif. en attente
+                                                        </span>
+                                                    )}
+                                                    {/* Badge annulation en attente */}
+                                                    {ev.annulation_en_attente && (
+                                                        <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: 'rgba(255,77,109,.15)', color: '#ff4d6d' }}>
+                                                            ⚠️ Annulation en attente
                                                         </span>
                                                     )}
                                                 </div>
@@ -1161,7 +1267,7 @@ const DashboardOrganisateur = () => {
                                                         </span>
                                                     </td>
                                                     <td className="text-muted">
-                                                        {p.scanner_date ? new Date(p.scanner_date).toLocaleTimeString('fr-FR') : '—'}
+                                                        {p.scanner_date ? fmtHeure(p.scanner_date) : '—'}
                                                     </td>
                                                     <td>
                                                         {!p.is_present && (
@@ -1341,39 +1447,54 @@ const DashboardOrganisateur = () => {
                 )}
 
                 {/* ── EXPLORER ── */}
-                {activeTab === 'explorer' && (
-                    <div>
-                        {suggestions.length > 0 && (
-                            <div style={{ marginBottom: 24 }}>
-                                <h3 style={{ fontSize: 14, fontWeight: 600, color: '#a78bfa', marginBottom: 12 }}>✨ Recommandé pour vous</h3>
+                {activeTab === 'explorer' && (() => {
+                    const inscritIds = new Set(mesInscriptions.map(i => i.eventId));
+                    return (
+                        <div>
+                            {suggestions.length > 0 && (
+                                <div style={{ marginBottom: 24 }}>
+                                    <h3 style={{ fontSize: 14, fontWeight: 600, color: '#a78bfa', marginBottom: 12 }}>✨ Recommandé pour vous</h3>
+                                    <div className="dash-events-grid">
+                                        {suggestions.slice(0, 4).map(ev => (
+                                            <div key={ev._id} style={{ position: 'relative' }}>
+                                                <span style={{ position: 'absolute', top: 8, right: 8, background: '#a78bfa22', color: '#a78bfa', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600, zIndex: 1 }}>
+                                                    {Math.round((ev.score || 0) * 100)}% match
+                                                </span>
+                                                <EventCard
+                                                    event={{ ...ev, id: ev._id }}
+                                                    mode="explorer"
+                                                    estInscrit={inscritIds.has(ev._id)}
+                                                    onSInscrire={() => sInscrire(ev._id)}
+                                                    onSeDesinscrire={() => annulerInscription(ev._id)}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <hr style={{ border: 'none', borderTop: '1px solid #2a2a4a', margin: '20px 0' }} />
+                                </div>
+                            )}
+                            {evenementsDispos.length === 0 ? (
+                                <div className="dash-empty">
+                                    <p className="dash-empty__icon">📅</p>
+                                    <p className="dash-empty__text">Aucun événement disponible.</p>
+                                </div>
+                            ) : (
                                 <div className="dash-events-grid">
-                                    {suggestions.slice(0, 4).map(ev => (
-                                        <div key={ev._id} style={{ position: 'relative' }}>
-                                            <span style={{ position: 'absolute', top: 8, right: 8, background: '#a78bfa22', color: '#a78bfa', fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 600, zIndex: 1 }}>
-                                                {Math.round((ev.score || 0) * 100)}% match
-                                            </span>
-                                            <EventCard event={{ ...ev, id: ev._id }} mode="explorer" onSInscrire={() => sInscrire(ev._id)} />
-                                        </div>
+                                    {evenementsDispos.map(ev => (
+                                        <EventCard
+                                            key={ev._id}
+                                            event={{ ...ev, id: ev._id }}
+                                            mode="explorer"
+                                            estInscrit={inscritIds.has(ev._id)}
+                                            onSInscrire={() => sInscrire(ev._id)}
+                                            onSeDesinscrire={() => annulerInscription(ev._id)}
+                                        />
                                     ))}
                                 </div>
-                                <hr style={{ border: 'none', borderTop: '1px solid #2a2a4a', margin: '20px 0' }} />
-                            </div>
-                        )}
-                        {evenementsDispos.length === 0 ? (
-                            <div className="dash-empty">
-                                <p className="dash-empty__icon">📅</p>
-                                <p className="dash-empty__text">Aucun événement disponible.</p>
-                            </div>
-                        ) : (
-                            <div className="dash-events-grid">
-                                {evenementsDispos.map(ev => (
-                                    <EventCard key={ev._id} event={{ ...ev, id: ev._id }} mode="explorer"
-                                        onSInscrire={() => sInscrire(ev._id)} />
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
+                            )}
+                        </div>
+                    );
+                })()}
 
                 {/* ── MES INSCRIPTIONS ── */}
                 {activeTab === 'mes-inscriptions' && (
@@ -1391,7 +1512,7 @@ const DashboardOrganisateur = () => {
                                         <div style={{ flex: 1, minWidth: 0 }}>
                                             <div style={{ fontSize: 15, fontWeight: 600, color: '#e8e8f0', marginBottom: 4 }}>{ins.titre}</div>
                                             <div style={{ fontSize: 12, color: '#8888aa' }}>
-                                                📅 {ins.date ? new Date(ins.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Date N/A'} · 📍 {ins.lieu || 'N/A'}
+                                                📅 {ins.date ? fmtDate(ins.date) : 'Date N/A'} · 📍 {ins.lieu || 'N/A'}
                                                 {ins.is_present && <span style={{ marginLeft: 8, color: '#10b981', fontWeight: 600 }}>✅ Présent</span>}
                                             </div>
                                         </div>
@@ -1451,16 +1572,6 @@ const DashboardOrganisateur = () => {
                                         placeholder="+216 XX XXX XXX" />
                                 </div>
                                 <div className="form-row">
-                                    <div className="form-group">
-                                        <label>Sexe</label>
-                                        <select value={profilForm.sexe}
-                                            onChange={e => setProfilForm({ ...profilForm, sexe: e.target.value })}
-                                            style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
-                                            <option value="">— Non précisé —</option>
-                                            <option value="homme">Homme</option>
-                                            <option value="femme">Femme</option>
-                                        </select>
-                                    </div>
                                     <div className="form-group">
                                         <label>Langue</label>
                                         <select value={profilForm.langue}

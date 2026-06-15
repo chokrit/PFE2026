@@ -184,20 +184,178 @@
 
 /* ── Barre de chargement ── */
 .splash-loader {
-    width: 150px;
-    height: 2px;
-    background: var(--color-border);
-    border-radius: 2px;
-    margin: var(--spacing-xl) auto 0;
+    width: 200px;
+    height: 3px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 3px;
+    margin: 1.5rem auto 0;
     overflow: hidden;
 }
 
 .loader-bar {
     height: 100%;
     background: linear-gradient(90deg, #00d4ff, #ff6b00);
-    border-radius: 2px;
+    border-radius: 3px;
     animation: loadingBar 3s linear forwards;
-    /* 3s = durée du splash */
+}
+
+.loader-bar--3s {
+    animation-duration: 3s;
+}
+
+/* ── Lignes de terrain sportif (fond) ── */
+.splash-field-lines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.07;
+    animation: fadeIn 1s ease 0.3s both;
+}
+
+.field-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(to bottom, transparent, #00d4ff, transparent);
+}
+
+.field-line--center { left: 50%; }
+.field-line--left   { left: 25%; }
+.field-line--right  { left: 75%; }
+
+.field-circle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40vmin;
+    height: 40vmin;
+    border-radius: 50%;
+    border: 1px solid #00d4ff;
+}
+
+/* ── Bloc nom ── */
+.splash-name-block {
+    margin-top: 1.2rem;
+    text-align: center;
+}
+
+/* Conteneur des lettres sur une ligne */
+.splash-name {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 1px;
+}
+
+/* Lettre individuelle — commence invisible, animée vers sa position */
+.splash-name-letter {
+    display: inline-block;
+    opacity: 0;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0.04em;
+}
+
+.splash-name-firstname {
+    font-size: clamp(26px, 4.5vw, 46px);
+    background: linear-gradient(135deg, #00d4ff, #00ffcc);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: none;
+    filter: drop-shadow(0 0 12px rgba(0, 212, 255, 0.6));
+}
+
+.splash-name-lastname {
+    font-size: clamp(22px, 3.8vw, 40px);
+    color: rgba(255, 255, 255, 0.88);
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.3));
+}
+
+.splash-name-space {
+    display: inline-block;
+    width: 0.5em;
+}
+
+/* Copyright */
+.splash-copyright {
+    margin-top: 0.6rem;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.28);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    animation: fadeIn 1s ease 1.2s both;
+}
+
+/* ══════════════════════════════════════════════════
+   ANIMATIONS SPORTIVES DES LETTRES
+   Chaque keyframe simule un mouvement d'athlète :
+   sprint, saut, rotation, rebond, glissade...
+══════════════════════════════════════════════════ */
+
+/* Sprint depuis la gauche (comme un coureur) */
+@keyframes flyFromLeft {
+    from {
+        transform: translateX(-120vw) skewX(-20deg);
+        opacity: 0;
+    }
+    80% { transform: translateX(6px) skewX(0deg); opacity: 1; }
+    to  { transform: none; opacity: 1; }
+}
+
+/* Sprint depuis la droite */
+@keyframes flyFromRight {
+    from {
+        transform: translateX(120vw) skewX(20deg);
+        opacity: 0;
+    }
+    80% { transform: translateX(-6px) skewX(0deg); opacity: 1; }
+    to  { transform: none; opacity: 1; }
+}
+
+/* Saut depuis le haut (saut en hauteur / perche) */
+@keyframes flyFromTop {
+    from {
+        transform: translateY(-80vh) rotate(-12deg) scale(0.7);
+        opacity: 0;
+    }
+    75% { transform: translateY(8px) rotate(2deg); opacity: 1; }
+    to  { transform: none; opacity: 1; }
+}
+
+/* Saut depuis le bas (gymnaste / plongeon) */
+@keyframes flyFromBottom {
+    from {
+        transform: translateY(80vh) scale(0.5);
+        opacity: 0;
+    }
+    70% { transform: translateY(-10px) scale(1.05); opacity: 1; }
+    to  { transform: none; opacity: 1; }
+}
+
+/* Rebond (basket / balle qui chute) */
+@keyframes bounceIn {
+    from {
+        transform: translateY(-90vh) scale(0.6);
+        opacity: 0;
+    }
+    55% { transform: translateY(0) scale(1.1); opacity: 1; }
+    70% { transform: translateY(-16px) scale(0.97); }
+    85% { transform: translateY(6px); }
+    to  { transform: none; opacity: 1; }
+}
+
+/* Rotation (lancer de disque / ballon qui tourne) */
+@keyframes spinIn {
+    from {
+        transform: rotate(-540deg) scale(0.1);
+        opacity: 0;
+    }
+    80% { transform: rotate(8deg) scale(1.05); opacity: 1; }
+    to  { transform: none; opacity: 1; }
 }
 
 /* ── Sélection de langue ── */

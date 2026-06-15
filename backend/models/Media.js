@@ -44,6 +44,8 @@ const mediaSchema = new mongoose.Schema({
             'photo_profil',      // approuvée automatiquement
             'photo_evenement',   // nécessite validation organisateur
             'photo_officielle',  // organisateur/admin → approuvée automatiquement
+            'video_evenement',   // uploadée par participant → en_attente
+            'video_officielle',  // uploadée par org/admin → approuvée automatiquement
         ],
     },
 
@@ -95,8 +97,8 @@ const mediaSchema = new mongoose.Schema({
 
 // ── Pre-save : approbation automatique et rotation photo profil ──
 mediaSchema.pre('save', async function (next) {
-    // photo_profil et photo_officielle → approuvées automatiquement
-    if (['photo_profil', 'photo_officielle'].includes(this.type_media)) {
+    // photo_profil, photo_officielle et video_officielle → approuvées automatiquement
+    if (['photo_profil', 'photo_officielle', 'video_officielle'].includes(this.type_media)) {
         this.statut = 'approuve';
     }
 

@@ -23,7 +23,7 @@ const genererToken = (id) => {
 // ─────────────────────────────────────────────────────────────
 const register = async (req, res) => {
   try {
-    const { first_name, last_name, email, password, telephone, sexe, langue, date_naissance, photo } = req.body;
+    const { first_name, last_name, email, password, telephone, langue, date_naissance, photo } = req.body;
 
     // Validation champs obligatoires
     if (!first_name || !last_name || !email || !password) {
@@ -49,7 +49,6 @@ const register = async (req, res) => {
       email:           email.toLowerCase().trim(),
       password_hash:   password,   // hashé par le pre-save hook
       telephone:       telephone || undefined,
-      sexe:            sexe || undefined,
       langue:          langue || 'fr',
       date_naissance:  date_naissance || undefined,
       photo:           photo || undefined,

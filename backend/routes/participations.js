@@ -20,6 +20,7 @@ const { verifyToken, isOrganisateur } = require('../middleware/auth');
 
 const Participation       = require('../models/Participation');
 const Evenement           = require('../models/Evenement');
+const { verifierChevauchement } = require('../utils/chevauchement');
 const Utilisateur         = require('../models/Utilisateur');
 const Interest            = require('../models/Interest');
 const Notification        = require('../models/Notification');
@@ -169,6 +170,17 @@ router.post('/:eventId/inscription', verifyToken, async (req, res) => {
             });
         }
 
+        // Vérifier le chevauchement avec les autres événements du participant
+        const conflit = await verifierChevauchement(
+            req.utilisateur._id,
+            evenement.ev_start_time,
+            evenement.ev_end_time || null,
+            eventId,
+        );
+        if (conflit) {
+            return res.status(409).json({ success: false, message: conflit.message });
+        }
+
         // Générer un token QR unique pour CE participant à CET événement
         // 48 caractères hex — assez long pour être impossible à deviner
         const qr_token = crypto.randomBytes(24).toString('hex');
@@ -213,10 +225,34 @@ router.get('/evenement/:eventId', verifyToken, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────
 // DELETE /api/participations/:eventId/annuler
-// Annuler son inscription
+// Annuler son inscription.
+// Règle : annulation impossible si l'événement commence dans moins de 24h
+// (applicable à tous les rôles, sans exception).
 // ─────────────────────────────────────────────────────────────
 router.delete('/:eventId/annuler', verifyToken, async (req, res) => {
     try {
+        // Récupérer l'événement pour vérifier la date de début
+        const evenement = await Evenement.findById(req.params.eventId)
+            .select('ev_start_time title_event');
+
+        if (!evenement) {
+            return res.status(404).json({ success: false, message: 'Événement introuvable' });
+        }
+
+        // Vérification du délai de 24h — pour tout le monde sans exception
+        const maintenant = new Date();
+        const debut      = new Date(evenement.ev_start_time);
+        const diffMs     = debut - maintenant;
+        const H24_MS     = 24 * 60 * 60 * 1000;
+
+        if (diffMs < H24_MS) {
+            const heuresRestantes = Math.max(0, Math.round(diffMs / (1000 * 60 * 60)));
+            const message = diffMs <= 0
+                ? "L'annulation est impossible : l'événement a déjà commencé."
+                : `Annulation impossible — l'événement commence dans ${heuresRestantes}h. Le délai minimum est de 24h avant le début.`;
+            return res.status(403).json({ success: false, message });
+        }
+
         const participation = await Participation.findOneAndDelete({
             utilisateur: req.utilisateur._id,
             evenement:   req.params.eventId,

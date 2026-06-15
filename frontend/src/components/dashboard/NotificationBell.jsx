@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../../api';
+import { fmtDateHeure } from '../../utils/dates';
 
 export default function NotificationBell() {
     const [notifs, setNotifs]     = useState([]);
@@ -154,10 +155,7 @@ export default function NotificationBell() {
                                             {n.message}
                                         </div>
                                         <div style={{ fontSize: 10, color: '#444', marginTop: 4 }}>
-                                            {new Date(n.created_at).toLocaleDateString('fr-FR', {
-                                                day: '2-digit', month: 'short',
-                                                hour: '2-digit', minute: '2-digit',
-                                            })}
+                                            {fmtDateHeure(n.created_at)}
                                         </div>
                                     </div>
                                     <button

@@ -15,23 +15,11 @@
 // ============================================================
 
 import React from 'react';
+import { fmtDate, fmtHeure } from '../../utils/dates';
 
-const EventCard = ({ event, mode, onVoirQR, onSInscrire, onAnnuler }) => {
-  // ── Formatage de la date ──
-  const formatDate = (dateStr) => {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('fr-FR', {
-      weekday: 'short',
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
-
-  const formatHeure = (dateStr) => {
-    const d = new Date(dateStr);
-    return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  };
+const EventCard = ({ event, mode, onVoirQR, onSInscrire, onAnnuler, estInscrit, onSeDesinscrire }) => {
+  const formatDate = fmtDate;
+  const formatHeure = fmtHeure;
 
   // ── Calcul du taux de remplissage ──
   const tauxRemplissage = event.max_participants > 0
@@ -39,6 +27,16 @@ const EventCard = ({ event, mode, onVoirQR, onSInscrire, onAnnuler }) => {
     : 0;
 
   const estComplet = event.nb_inscrits >= event.max_participants;
+
+  // ── Vérification du délai d'annulation (24h minimum avant début) ──
+  const maintenant = new Date();
+  const dateDebut  = new Date(event.ev_start_time || event.date);
+  const diffMs     = dateDebut - maintenant;
+  const annulationAutorisee = diffMs > 24 * 60 * 60 * 1000;
+  const heuresAvantEvenement = Math.max(0, Math.round(diffMs / (1000 * 60 * 60)));
+  const msgBlocage = diffMs <= 0
+    ? "Événement déjà commencé"
+    : `Annulation impossible — débute dans ${heuresAvantEvenement}h (délai min. 24h)`;
 
   // ── Couleur de la catégorie ──
   const categorieColor = {
@@ -118,32 +116,87 @@ const EventCard = ({ event, mode, onVoirQR, onSInscrire, onAnnuler }) => {
             </button>
             {!event.is_present && event.stat_event !== 'terminé' && event.stat_event !== 'annulé' && (
               <button
-                onClick={onAnnuler}
+                onClick={annulationAutorisee ? onAnnuler : undefined}
+                disabled={!annulationAutorisee}
+                title={!annulationAutorisee ? msgBlocage : 'Annuler mon inscription'}
                 style={{
-                  padding: '6px 12px', background: 'transparent', color: '#ff4d6d',
-                  border: '1px solid rgba(255,77,109,.3)', borderRadius: '6px',
-                  fontSize: '12px', cursor: 'pointer', fontFamily: 'Poppins,sans-serif',
+                  padding: '6px 12px',
+                  background: annulationAutorisee ? 'transparent' : 'rgba(136,136,136,.08)',
+                  color: annulationAutorisee ? '#ff4d6d' : '#555577',
+                  border: `1px solid ${annulationAutorisee ? 'rgba(255,77,109,.3)' : '#2a2a4a'}`,
+                  borderRadius: '6px', fontSize: '12px',
+                  cursor: annulationAutorisee ? 'pointer' : 'not-allowed',
+                  fontFamily: 'Poppins,sans-serif',
+                  opacity: annulationAutorisee ? 1 : 0.6,
                 }}
               >
-                Annuler
+                {annulationAutorisee ? 'Se désinscrire' : '🔒 Annulation bloquée'}
               </button>
             )}
           </>
         )}
 
         {mode === 'explorer' && (
-          <button
-            className="dash-btn-primary event-card__btn"
-            onClick={onSInscrire}
-            disabled={estComplet}
-            title={estComplet ? 'Événement complet' : "S'inscrire à cet événement"}
-          >
-            {estComplet ? 'Complet' : "S'inscrire →"}
-          </button>
+          (event.stat_event === 'terminé' || event.stat_event === 'annulé') ? (
+            <div
+              style={{
+                display: 'block',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                fontWeight: 600,
+                background: 'rgba(136,136,136,.1)',
+                color: '#555577',
+                border: '1px solid #2a2a4a',
+                cursor: 'default',
+                textAlign: 'center',
+                width: '100%',
+                fontFamily: 'Poppins,sans-serif',
+                boxSizing: 'border-box',
+              }}
+            >
+              {event.stat_event === 'annulé' ? '✕ Annulé' : '■ Terminé'}
+            </div>
+          ) : estInscrit ? (
+            <div style={{ width: '100%' }}>
+              <button
+                onClick={annulationAutorisee ? onSeDesinscrire : undefined}
+                disabled={!annulationAutorisee}
+                title={!annulationAutorisee ? msgBlocage : 'Annuler mon inscription'}
+                style={{
+                  padding: '8px 16px', width: '100%', borderRadius: '8px',
+                  fontSize: '13px', fontFamily: 'Poppins,sans-serif', fontWeight: 600,
+                  cursor: annulationAutorisee ? 'pointer' : 'not-allowed',
+                  background: annulationAutorisee ? 'rgba(255,77,109,.12)' : 'rgba(0,230,118,.12)',
+                  color: annulationAutorisee ? '#ff4d6d' : '#00e676',
+                  border: `1px solid ${annulationAutorisee ? 'rgba(255,77,109,.35)' : 'rgba(0,230,118,.35)'}`,
+                  opacity: annulationAutorisee ? 1 : 0.85,
+                }}
+              >
+                {annulationAutorisee ? '✓ Inscrit · Se désinscrire' : '✓ Inscrit · 🔒 Annulation bloquée'}
+              </button>
+              {!annulationAutorisee && (
+                <div style={{ fontSize: 10, color: '#555577', textAlign: 'center', marginTop: 4 }}>
+                  {msgBlocage}
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              className="dash-btn-primary event-card__btn"
+              onClick={onSInscrire}
+              disabled={estComplet}
+              title={estComplet ? 'Événement complet' : "S'inscrire à cet événement"}
+            >
+              {estComplet ? 'Complet' : "S'inscrire →"}
+            </button>
+          )
         )}
       </div>
     </div>
   );
 };
+
+
 
 export default EventCard;

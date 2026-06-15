@@ -124,12 +124,25 @@ const evenementSchema = new mongoose.Schema({
     },
 
     // ── Annulation ────────────────────────────────────────────
-    // Raison obligatoire quand stat_event passe à 'annulé'.
-    // Affichée dans le badge "Annulé" côté frontend et dans
-    // la notification envoyée aux participants.
     raison_annulation: {
         type: String,
         default: null,
+    },
+
+    // Annulation soumise par un créateur simple, en attente de confirmation
+    // par un organisateur ou l'admin (même workflow que modification_en_attente).
+    annulation_en_attente: {
+        type: Boolean,
+        default: false,
+    },
+    annulation_proposee: {
+        raison: { type: String, default: null },
+        proposee_par: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Utilisateur',
+            default: null,
+        },
+        proposee_le: { type: Date, default: null },
     },
 
 }, {

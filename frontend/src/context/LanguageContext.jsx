@@ -71,10 +71,6 @@ const translations = {
     email: 'Adresse email',
     phone: 'Numéro de téléphone',
     birthDate: 'Date de naissance',
-    sexe: 'Sexe',
-    sexeHomme: 'Homme',
-    sexeFemme: 'Femme',
-    sexeAutre: 'Autre',
     role: 'Rôle',
     roleSportif: 'Sportif',
     roleOrganisateur: 'Organisateur',
@@ -114,11 +110,15 @@ const translations = {
     progressToNext: 'Progression vers le niveau suivant',
     participateForPoints: 'Participez à des événements pour gagner des points et débloquer des coupons !',
 
-    // Onglets dashboard user
+    // Onglets dashboard user / organisateur
     myRegistrations: 'Mes inscriptions',
     explore: 'Explorer',
+    connections: 'Connexions',
     myCreations: 'Mes créations',
     rewards: 'Récompenses',
+    myProfile: 'Mon profil',
+    myEvents: 'Mes événements',
+    participants: 'Participants',
 
     // Événements
     proposeEvent: 'Proposer un événement',
@@ -156,6 +156,9 @@ const translations = {
     globalView: 'Vue globale',
     users: 'Utilisateurs',
     events: 'Événements',
+    categories: 'Catégories',
+    scanner: 'QR Code',
+    medias: 'Médias',
     totalUsers: 'Utilisateurs inscrits',
     publishedEvents: 'Événements publiés',
     totalParticipations: 'Total participations',
@@ -257,10 +260,6 @@ const translations = {
     email: 'Email address',
     phone: 'Phone number',
     birthDate: 'Date of birth',
-    sexe: 'Gender',
-    sexeHomme: 'Male',
-    sexeFemme: 'Female',
-    sexeAutre: 'Other',
     role: 'Role',
     roleSportif: 'Athlete',
     roleOrganisateur: 'Organizer',
@@ -293,8 +292,12 @@ const translations = {
     participateForPoints: 'Participate in events to earn points and unlock coupons!',
     myRegistrations: 'My registrations',
     explore: 'Explore',
+    connections: 'Connections',
     myCreations: 'My creations',
     rewards: 'Rewards',
+    myProfile: 'My profile',
+    myEvents: 'My events',
+    participants: 'Participants',
     proposeEvent: 'Propose an event',
     createEvent: 'Create an event',
     eventTitle: 'Event title',
@@ -326,6 +329,9 @@ const translations = {
     globalView: 'Overview',
     users: 'Users',
     events: 'Events',
+    categories: 'Categories',
+    scanner: 'QR Code',
+    medias: 'Media',
     totalUsers: 'Registered users',
     publishedEvents: 'Published events',
     totalParticipations: 'Total participations',
@@ -421,10 +427,6 @@ const translations = {
     email: 'البريد الإلكتروني',
     phone: 'رقم الهاتف',
     birthDate: 'تاريخ الميلاد',
-    sexe: 'الجنس',
-    sexeHomme: 'ذكر',
-    sexeFemme: 'أنثى',
-    sexeAutre: 'آخر',
     role: 'الدور',
     roleSportif: 'رياضي',
     roleOrganisateur: 'منظم',
@@ -457,8 +459,12 @@ const translations = {
     participateForPoints: 'شارك في الفعاليات لكسب النقاط وفتح القسائم!',
     myRegistrations: 'تسجيلاتي',
     explore: 'استكشف',
+    connections: 'التواصلات',
     myCreations: 'إنشاءاتي',
     rewards: 'المكافآت',
+    myProfile: 'ملفي الشخصي',
+    myEvents: 'فعالياتي',
+    participants: 'المشاركون',
     proposeEvent: 'اقتراح فعالية',
     createEvent: 'إنشاء فعالية',
     eventTitle: 'عنوان الفعالية',
@@ -490,6 +496,9 @@ const translations = {
     globalView: 'نظرة عامة',
     users: 'المستخدمون',
     events: 'الفعاليات',
+    categories: 'الفئات',
+    scanner: 'QR Code',
+    medias: 'الوسائط',
     totalUsers: 'المستخدمون المسجلون',
     publishedEvents: 'الفعاليات المنشورة',
     totalParticipations: 'إجمالي المشاركات',
@@ -585,10 +594,6 @@ const translations = {
     email: 'الإيميل',
     phone: 'تيليفون',
     birthDate: 'تاريخ الميلاد',
-    sexe: 'الجنس',
-    sexeHomme: 'ذكر',
-    sexeFemme: 'أنثى',
-    sexeAutre: 'آخر',
     role: 'الدور',
     roleSportif: 'رياضي',
     roleOrganisateur: 'منظم',
@@ -621,8 +626,12 @@ const translations = {
     participateForPoints: 'شارك في الفعاليات باش تكسب نقاط وتفتح قسائم!',
     myRegistrations: 'تسجيلاتي',
     explore: 'استكشف',
+    connections: 'التواصلات',
     myCreations: 'اللي عملت',
     rewards: 'المكافآت',
+    myProfile: 'ملفي',
+    myEvents: 'فعالياتي',
+    participants: 'المشاركين',
     proposeEvent: 'اقترح فعالية',
     createEvent: 'اعمل فعالية',
     eventTitle: 'عنوان الفعالية',
@@ -654,6 +663,9 @@ const translations = {
     globalView: 'نظرة عامة',
     users: 'المستخدمين',
     events: 'الفعاليات',
+    categories: 'الفئات',
+    scanner: 'QR Code',
+    medias: 'الميديا',
     totalUsers: 'المستخدمين المسجلين',
     publishedEvents: 'الفعاليات المنشورة',
     totalParticipations: 'جملة المشاركات',
@@ -738,11 +750,20 @@ const LanguageContext = createContext(null);
 // ─────────────────────────────────────────────────────────────
 export const LanguageProvider = ({ children }) => {
 
-  // Lire la langue sauvegardée, ou 'en' par défaut
+  // Initialisation avec ordre de priorité strict :
+  //   1. event_langue     — langue choisie explicitement dans la session
+  //                         (LanguageSelect ou LanguageSwitcher)
+  //   2. event_user.langue — langue sauvegardée dans le profil MongoDB,
+  //                          restaurée après un login sur autre appareil
+  //   3. 'fr'             — français par défaut si rien n'est trouvé
   const [langue, setLangueState] = useState(() => {
     const saved = localStorage.getItem('event_langue');
-    // Vérifier que la langue sauvegardée existe vraiment dans translations
-    return translations[saved] ? saved : 'en';
+    if (translations[saved]) return saved;
+    try {
+      const user = JSON.parse(localStorage.getItem('event_user') || '{}');
+      if (translations[user.langue]) return user.langue;
+    } catch { /* localStorage corrompu → ignorer */ }
+    return 'fr';
   });
 
   // Langues qui s'écrivent de droite à gauche
@@ -766,14 +787,15 @@ export const LanguageProvider = ({ children }) => {
     }
   }, [langue, isRTL]);
 
-  // Changer la langue depuis n'importe quel composant
+  // Changer la langue depuis n'importe quel composant.
+  // Appelé par : LanguageSelect, LanguageSwitcher,
+  //              Login (après login), sauvegarderProfil (après sauvegarde).
   const setLangue = (nouvelleLangue) => {
-    // Vérifier que la langue existe
     if (!translations[nouvelleLangue]) {
       console.warn(`[LanguageContext] Langue inconnue : "${nouvelleLangue}"`);
       return;
     }
-    // Sauvegarder dans localStorage pour persister entre sessions
+    // Persiste dans event_langue → relu au prochain montage du Provider
     localStorage.setItem('event_langue', nouvelleLangue);
     setLangueState(nouvelleLangue);
   };

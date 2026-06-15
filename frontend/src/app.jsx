@@ -110,9 +110,8 @@ function App() {
             }
           />
 
-          {/* Redirection de la racine */}
-          {/* Redirige vers /login si pas connecté, géré par ProtectedRoute */}
-          <Route path="/" element={<Navigate to="/login" replace />} />
+          {/* Redirection de la racine → splash screen */}
+          <Route path="/" element={<Navigate to="/splash" replace />} />
 
           {/* 404 — toute route inconnue → login */}
           <Route path="*" element={<Navigate to="/login" replace />} />

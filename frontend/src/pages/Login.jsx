@@ -16,7 +16,7 @@ import '../styles/login.css';
 
 const Login = () => {
   const navigate = useNavigate();
-  const { t, isRTL } = useLanguage();
+  const { t, isRTL, setLangue } = useLanguage();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,6 +43,18 @@ const Login = () => {
       if (response.data.success) {
         const token = response.data.token;
         const utilisateur = response.data.utilisateur;
+
+        // Synchroniser la langue après login.
+        // Priorité :
+        //   1. event_langue déjà en localStorage (choix explicite de la session)
+        //   2. langue du profil retourné par le backend (autre appareil, autre session)
+        //   3. 'fr' par défaut
+        const langueSession = localStorage.getItem('event_langue');
+        const langueARestaurer = langueSession || utilisateur.langue || 'fr';
+        setLangue(langueARestaurer); // met à jour le contexte ET event_langue
+
+        // Aligner l'objet utilisateur avec la langue résolue avant stockage
+        utilisateur.langue = langueARestaurer;
 
         // Stocker dans localStorage
         localStorage.setItem('event_token', token);

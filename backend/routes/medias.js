@@ -17,12 +17,15 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+const VIDEO_MIMETYPES = ['video/mp4', 'video/quicktime', 'video/avi', 'video/webm', 'video/x-matroska'];
+const IMAGE_MIMETYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+
 // Multer en mémoire — on upload ensuite via stream vers Cloudinary
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5 Mo max
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100 Mo max — validation fine par type dans la route
     fileFilter: (req, file, cb) => {
-        const ok = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+        const ok = [...IMAGE_MIMETYPES, ...VIDEO_MIMETYPES];
         cb(null, ok.includes(file.mimetype));
     },
 });
@@ -32,16 +35,21 @@ const dossier = (type) => ({
     photo_profil:     'event-app/profils',
     photo_evenement:  'event-app/evenements',
     photo_officielle: 'event-app/officielles',
+    video_evenement:  'event-app/videos',
+    video_officielle: 'event-app/videos-officielles',
 }[type] || 'event-app/divers');
 
 // ── Helper : upload buffer vers Cloudinary v2 ──
-const uploadVersCloudinary = (buffer, folder, publicId) => new Promise((resolve, reject) => {
+const uploadVersCloudinary = (buffer, folder, publicId, resourceType = 'image') => new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
         {
             folder,
             public_id: publicId,
             overwrite: true,
-            transformation: [{ width: 1200, quality: 'auto', fetch_format: 'auto' }],
+            resource_type: resourceType,
+            ...(resourceType === 'image' && {
+                transformation: [{ width: 1200, quality: 'auto', fetch_format: 'auto' }],
+            }),
         },
         (err, result) => { if (err) reject(err); else resolve(result); }
     );
@@ -51,6 +59,25 @@ const uploadVersCloudinary = (buffer, folder, publicId) => new Promise((resolve,
 // ── Helper : générer URL thumbnail depuis public_id ──
 const thumbnail = (publicId) => cloudinary.url(publicId, {
     width: 300, height: 300, crop: 'fill', quality: 'auto', fetch_format: 'auto',
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/medias/galerie — Toutes les photos d'événements approuvées
+// Retourne une liste plate ; le frontend groupe par événement
+// ─────────────────────────────────────────────────────────────
+router.get('/galerie', verifyToken, async (req, res) => {
+    try {
+        const photos = await Media.find({
+            type_media: { $in: ['photo_evenement', 'photo_officielle', 'video_evenement', 'video_officielle'] },
+            statut: 'approuve',
+        })
+            .populate('utilisateur', 'first_name last_name')
+            .populate('evenement', 'title_event ev_start_time')
+            .sort({ uploaded_at: -1 });
+        return res.json({ success: true, count: photos.length, photos });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -80,18 +107,28 @@ router.post('/upload', verifyToken, upload.single('photo'), async (req, res) => 
         if (!req.file) return res.status(400).json({ success: false, message: 'Aucune image reçue' });
 
         const { type_media, evenement_id } = req.body;
-        const typesValides = ['photo_profil', 'photo_evenement', 'photo_officielle'];
+        const typesValides = ['photo_profil', 'photo_evenement', 'photo_officielle', 'video_evenement', 'video_officielle'];
         if (!typesValides.includes(type_media)) {
             return res.status(400).json({ success: false, message: 'type_media invalide' });
         }
 
+        // Validation taille selon type de fichier
+        const estVideo = VIDEO_MIMETYPES.includes(req.file.mimetype);
+        const tailleMax = estVideo ? 100 * 1024 * 1024 : 5 * 1024 * 1024;
+        if (req.file.size > tailleMax) {
+            return res.status(400).json({
+                success: false,
+                message: estVideo ? 'Vidéo trop lourde (max 100 Mo)' : 'Image trop lourde (max 5 Mo)',
+            });
+        }
+
         // Vérification droits selon type
-        if (type_media === 'photo_officielle') {
+        if (['photo_officielle', 'video_officielle'].includes(type_media)) {
             if (!['admin', 'organisateur'].includes(req.utilisateur.role)) {
                 return res.status(403).json({ success: false, message: 'Droits organisateur requis' });
             }
         }
-        if (type_media === 'photo_evenement') {
+        if (['photo_evenement', 'video_evenement'].includes(type_media)) {
             if (!evenement_id) return res.status(400).json({ success: false, message: 'evenement_id requis' });
             const inscrit = await Participation.findOne({ utilisateur: req.utilisateur._id, evenement: evenement_id });
             if (!inscrit && !['admin', 'organisateur'].includes(req.utilisateur.role)) {
@@ -100,11 +137,15 @@ router.post('/upload', verifyToken, upload.single('photo'), async (req, res) => 
         }
 
         const publicId = `${Date.now()}_${req.utilisateur._id}`;
-        const result = await uploadVersCloudinary(req.file.buffer, dossier(type_media), publicId);
+        const resourceType = estVideo ? 'video' : 'image';
+        const result = await uploadVersCloudinary(req.file.buffer, dossier(type_media), publicId, resourceType);
 
         const media = await Media.create({
             file_url:       result.secure_url,
-            thumbnail_url:  thumbnail(result.public_id),
+            thumbnail_url:  estVideo ? null : thumbnail(result.public_id),
+            /* THUMBNAIL VIDÉO : Cloudinary peut générer une miniature automatiquement
+               via l'URL en ajoutant /so_0 (screenshot à 0 seconde).
+               À activer si besoin en version future. */
             public_id:      result.public_id,
             utilisateur:    req.utilisateur._id,
             evenement:      evenement_id || null,

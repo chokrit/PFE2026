@@ -24,7 +24,6 @@ const Register = () => {
         confirmPassword:'',
         telephone:      '',
         date_naissance: '',
-        sexe:           '',
         roleAffiche:    'sportif',
     });
 
@@ -40,6 +39,13 @@ const Register = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError]     = useState('');
     const [success, setSuccess] = useState(false);
+
+    // ── Suggestion de nouvelle catégorie ────────────────────────
+    const [showSuggCat, setShowSuggCat]         = useState(false);
+    const [suggGroup, setSuggGroup]             = useState('');
+    const [suggType, setSuggType]               = useState('');
+    const [suggRaison, setSuggRaison]           = useState('');
+    const [pendingSuggestions, setPendingSuggestions] = useState([]);
 
     // ── Charger les catégories au montage ───────────────────────
     useEffect(() => {
@@ -90,6 +96,17 @@ const Register = () => {
         });
     };
 
+    // ── Ajouter une suggestion en file d'attente ─────────────────
+    const ajouterSuggestion = () => {
+        if (!suggGroup.trim() || !suggType.trim()) return;
+        setPendingSuggestions(prev => [
+            ...prev,
+            { group: suggGroup.trim(), type: suggType.trim(), raison: suggRaison.trim() },
+        ]);
+        setSuggGroup(''); setSuggType(''); setSuggRaison('');
+        setShowSuggCat(false);
+    };
+
     // Regrouper par event_categ
     const grouped = categories.reduce((acc, cat) => {
         const key = cat.event_categ || 'Autre';
@@ -134,7 +151,6 @@ const Register = () => {
                 email:          form.email.toLowerCase().trim(),
                 password:       form.password,
                 telephone:      form.telephone.trim() || undefined,
-                sexe:           form.sexe || undefined,
                 date_naissance: form.date_naissance || undefined,
                 langue:         localStorage.getItem('event_langue') || 'fr',
             });
@@ -170,6 +186,18 @@ const Register = () => {
                         );
                     } catch {
                         // Non bloquant — le compte est créé
+                    }
+                }
+
+                // Soumettre les suggestions de catégories en attente
+                for (const s of pendingSuggestions) {
+                    try {
+                        await axios.post('/api/categories/suggerer',
+                            { event_categ: s.group, event_type: s.type, raison_suggestion: s.raison },
+                            authHeader
+                        );
+                    } catch {
+                        // Non bloquant
                     }
                 }
 
@@ -336,20 +364,6 @@ const Register = () => {
                             style={{ colorScheme: 'dark' }} />
                     </div>
 
-                    {/* ── SEXE ── */}
-                    <div className="form-group">
-                        <label className="form-label">
-                            {t('sexe')}
-                            <span style={{ color: '#8888aa', marginLeft: 4, fontSize: 11 }}>({t('optional')})</span>
-                        </label>
-                        <select className="form-input" name="sexe" value={form.sexe} onChange={handleChange}
-                            style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
-                            <option value="">— Sélectionner —</option>
-                            <option value="homme">{t('sexeHomme')}</option>
-                            <option value="femme">{t('sexeFemme')}</option>
-                        </select>
-                    </div>
-
                     {/* ── RÔLE (visuel — backend force 'user') ── */}
                     <div className="form-group">
                         <label className="form-label">{t('role')}</label>
@@ -379,42 +393,116 @@ const Register = () => {
                     </div>
 
                     {/* ── CENTRES D'INTÉRÊT ── */}
-                    {categories.length > 0 && (
-                        <div className="form-group">
-                            <label className="form-label">
-                                Centres d'intérêt
-                                <span style={{ color: '#8888aa', marginLeft: 4, fontSize: 11 }}>({t('optional')})</span>
-                            </label>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                {Object.entries(grouped).map(([groupName, cats]) => (
-                                    <div key={groupName}>
-                                        <div style={{ fontSize: 10, color: '#8888aa', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                            {groupName}
-                                        </div>
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                            {cats.map(cat => {
-                                                const active = selectedCats.has(cat._id);
-                                                return (
-                                                    <button key={cat._id} type="button"
-                                                        onClick={() => toggleCat(cat._id)}
-                                                        style={{
-                                                            padding: '4px 10px', fontSize: 12, cursor: 'pointer',
-                                                            borderRadius: 20, fontFamily: 'Poppins,sans-serif',
-                                                            background: active ? 'rgba(0,212,255,.15)' : 'transparent',
-                                                            color: active ? '#00d4ff' : '#666688',
-                                                            border: `1px solid ${active ? '#00d4ff' : '#2a2a4a'}`,
-                                                            fontWeight: active ? 600 : 400,
-                                                        }}>
-                                                        {active ? '✓ ' : ''}{cat.event_type || cat.event_categ}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
+                    <div className="form-group">
+                        <label className="form-label">
+                            Centres d'intérêt
+                            <span style={{ color: '#8888aa', marginLeft: 4, fontSize: 11 }}>({t('optional')})</span>
+                        </label>
+
+                        {/* Chips des groupes existants */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                            {Object.entries(grouped).map(([groupName, cats]) => {
+                                const repId = cats[0]._id;
+                                const active = selectedCats.has(repId);
+                                return (
+                                    <button key={groupName} type="button"
+                                        onClick={() => toggleCat(repId)}
+                                        style={{
+                                            padding: '6px 14px', fontSize: 13, cursor: 'pointer',
+                                            borderRadius: 20, fontFamily: 'Poppins,sans-serif',
+                                            background: active ? 'rgba(0,212,255,.15)' : 'transparent',
+                                            color: active ? '#00d4ff' : '#666688',
+                                            border: `1px solid ${active ? '#00d4ff' : '#2a2a4a'}`,
+                                            fontWeight: active ? 600 : 400,
+                                            transition: 'all .2s',
+                                        }}>
+                                        {active ? '✓ ' : ''}{groupName}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {/* Suggestions en attente */}
+                        {pendingSuggestions.length > 0 && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 10 }}>
+                                {pendingSuggestions.map((s, i) => (
+                                    <div key={i} style={{
+                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                        background: 'rgba(255,167,38,.06)', border: '1px solid rgba(255,167,38,.2)',
+                                        borderRadius: 8, padding: '5px 10px', fontSize: 12,
+                                    }}>
+                                        <span>
+                                            <span style={{ color: '#ffa726' }}>💡 {s.group}</span>
+                                            <span style={{ color: '#8888aa' }}> / {s.type}</span>
+                                            <span style={{ color: '#555577', marginLeft: 6, fontSize: 11 }}>(en attente de validation)</span>
+                                        </span>
+                                        <button type="button"
+                                            onClick={() => setPendingSuggestions(prev => prev.filter((_, j) => j !== i))}
+                                            style={{ background: 'transparent', border: 'none', color: '#ff4d6d', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>
+                                            ×
+                                        </button>
                                     </div>
                                 ))}
                             </div>
-                        </div>
-                    )}
+                        )}
+
+                        {/* Formulaire de suggestion */}
+                        {!showSuggCat ? (
+                            <button type="button" onClick={() => setShowSuggCat(true)}
+                                style={{
+                                    fontSize: 12, color: '#8888aa', background: 'transparent',
+                                    border: '1px dashed #2a2a4a', borderRadius: 20,
+                                    padding: '4px 14px', cursor: 'pointer', fontFamily: 'Poppins,sans-serif',
+                                    transition: 'all .2s',
+                                }}>
+                                + Suggérer une autre catégorie
+                            </button>
+                        ) : (
+                            <div style={{
+                                background: '#12122a', border: '1px solid #2a2a4a',
+                                borderRadius: 10, padding: '12px 14px', marginTop: 4,
+                            }}>
+                                <div style={{ fontSize: 11, color: '#8888aa', marginBottom: 8, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                                    Nouvelle catégorie
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                                    <input
+                                        type="text" placeholder="Groupe (ex: Arts martiaux)"
+                                        value={suggGroup} onChange={e => setSuggGroup(e.target.value)}
+                                        className="form-input" style={{ fontSize: 12, padding: '6px 10px' }} />
+                                    <input
+                                        type="text" placeholder="Sport (ex: Judo)"
+                                        value={suggType} onChange={e => setSuggType(e.target.value)}
+                                        className="form-input" style={{ fontSize: 12, padding: '6px 10px' }} />
+                                </div>
+                                <input
+                                    type="text" placeholder="Raison (optionnel)"
+                                    value={suggRaison} onChange={e => setSuggRaison(e.target.value)}
+                                    className="form-input"
+                                    style={{ fontSize: 12, padding: '6px 10px', width: '100%', boxSizing: 'border-box', marginBottom: 8 }} />
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button type="button" onClick={ajouterSuggestion}
+                                        disabled={!suggGroup.trim() || !suggType.trim()}
+                                        style={{
+                                            fontSize: 12, padding: '5px 14px', borderRadius: 6, cursor: 'pointer',
+                                            background: (!suggGroup.trim() || !suggType.trim()) ? '#1a1a35' : 'rgba(0,212,255,.12)',
+                                            color: (!suggGroup.trim() || !suggType.trim()) ? '#444466' : '#00d4ff',
+                                            border: '1px solid rgba(0,212,255,.25)', fontFamily: 'Poppins,sans-serif',
+                                        }}>
+                                        Ajouter
+                                    </button>
+                                    <button type="button" onClick={() => { setShowSuggCat(false); setSuggGroup(''); setSuggType(''); setSuggRaison(''); }}
+                                        style={{
+                                            fontSize: 12, padding: '5px 14px', borderRadius: 6, cursor: 'pointer',
+                                            background: 'transparent', color: '#8888aa',
+                                            border: '1px solid #2a2a4a', fontFamily: 'Poppins,sans-serif',
+                                        }}>
+                                        Annuler
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
                     {/* ── ERREUR ── */}
                     {error && (

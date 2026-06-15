@@ -21,6 +21,8 @@ const {
   annulerEvenement,
   approuverModification,
   refuserModification,
+  approuverAnnulation,
+  refuserAnnulation,
 } = require('../controllers/evenementController');
 
 // GET /api/evenements — Événements publiés (accessible sans connexion)
@@ -66,5 +68,11 @@ router.post('/:id/approuver-modification', verifyToken, isOrganisateur, approuve
 
 // POST /api/evenements/:id/refuser-modification — Orga/admin refuse avec raison
 router.post('/:id/refuser-modification', verifyToken, isOrganisateur, refuserModification);
+
+// POST /api/evenements/:id/approuver-annulation — Orga/admin confirme l'annulation
+router.post('/:id/approuver-annulation', verifyToken, isOrganisateur, approuverAnnulation);
+
+// POST /api/evenements/:id/refuser-annulation — Orga/admin refuse la demande d'annulation
+router.post('/:id/refuser-annulation', verifyToken, isOrganisateur, refuserAnnulation);
 
 module.exports = router;

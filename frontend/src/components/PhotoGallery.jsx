@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import PhotoLightbox from './PhotoLightbox';
 
+const VIDEO_FORMATS = ['mp4', 'mov', 'avi', 'webm', 'mkv'];
+const estVideo = (media) => VIDEO_FORMATS.includes((media?.format || '').toLowerCase());
+
 export default function PhotoGallery({ photos = [], onAjouter, peutAjouter = false, uploading = false }) {
   const [lightboxIdx, setLightboxIdx] = useState(null);
 
@@ -16,11 +19,19 @@ export default function PhotoGallery({ photos = [], onAjouter, peutAjouter = fal
               cursor: 'pointer', border: '2px solid #333', flexShrink: 0,
             }}
           >
-            <img
-              src={photo.thumbnail_url || photo.file_url || photo}
-              alt=""
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
+            {estVideo(photo) ? (
+              <video
+                src={photo.file_url}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                muted
+              />
+            ) : (
+              <img
+                src={photo.thumbnail_url || photo.file_url || photo}
+                alt=""
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            )}
           </div>
         ))}
 
@@ -35,7 +46,7 @@ export default function PhotoGallery({ photos = [], onAjouter, peutAjouter = fal
             {uploading ? 'Envoi...' : 'Ajouter'}
             <input
               type="file"
-              accept="image/*"
+              accept="image/*,video/mp4,video/quicktime,video/avi,video/webm"
               style={{ display: 'none' }}
               disabled={uploading}
               onChange={(e) => {

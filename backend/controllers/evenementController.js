@@ -18,6 +18,7 @@ const Review        = require('../models/Review');
 const Connexion     = require('../models/Connexion');
 const Notification  = require('../models/Notification');
 const crypto        = require('crypto');
+const { verifierChevauchement } = require('../utils/chevauchement');
 
 // ── Helper : envoyer une notification à tous les participants d'un événement ──
 // Utilisé par annulerEvenement, approuverModification, etc.
@@ -143,6 +144,16 @@ const creerEvenement = async (req, res) => {
       });
     }
 
+    // ── Vérification de chevauchement ──
+    const conflit = await verifierChevauchement(
+      req.utilisateur._id,
+      ev_start_time,
+      ev_end_time || null,
+    );
+    if (conflit) {
+      return res.status(409).json({ success: false, message: conflit.message });
+    }
+
     // ── RÈGLE CLÉ : statut selon le rôle ──
     // user         → toujours 'brouillon', l'admin publiera après validation
     // admin/orga   → respecte le choix du formulaire
@@ -227,6 +238,16 @@ const modifierEvenement = async (req, res) => {
             });
         }
 
+        // Vérifier le chevauchement sur les nouvelles dates proposées
+        if (ev_start_time || ev_end_time) {
+            const newStart = ev_start_time ? new Date(ev_start_time) : ev.ev_start_time;
+            const newEnd   = ev_end_time   ? new Date(ev_end_time)   : ev.ev_end_time;
+            const conflit  = await verifierChevauchement(req.utilisateur._id, newStart, newEnd, req.params.id);
+            if (conflit) {
+                return res.status(409).json({ success: false, message: conflit.message });
+            }
+        }
+
         // Stocker les nouvelles valeurs proposées
         const proposee = {
             titre:            title_event?.trim()           || ev.title_event,
@@ -268,6 +289,19 @@ const modifierEvenement = async (req, res) => {
     }
 
     // ── CAS 2 : organisateur/admin → application directe ─────────
+    // Vérifier le chevauchement pour le créateur si les dates changent
+    if (ev_start_time || ev_end_time) {
+        const newStart = ev_start_time ? new Date(ev_start_time) : ev.ev_start_time;
+        const newEnd   = ev_end_time   ? new Date(ev_end_time)   : ev.ev_end_time;
+        const conflit  = await verifierChevauchement(ev.createur._id, newStart, newEnd, req.params.id);
+        if (conflit) {
+            return res.status(409).json({
+                success: false,
+                message: `Impossible de déplacer l'événement : le créateur a un conflit — ${conflit.message}`,
+            });
+        }
+    }
+
     const updates = {};
     if (title_event)       updates.title_event       = title_event.trim();
     if (event_description !== undefined) updates.event_description = event_description?.trim() || '';
@@ -414,9 +448,14 @@ const refuserModification = async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // POST /api/evenements/:id/annuler
 // Body : { raison } — obligatoire
-// Créateur, organisateur ou admin peuvent annuler.
-// Tous les participants inscrits reçoivent une notification
-// avec la raison et un message d'excuse chaleureux.
+//
+// RÈGLES :
+//   créateur simple → annulation stockée dans annulation_proposee,
+//     en attente de confirmation par orga/admin.
+//     Une notification est envoyée aux admins et organisateurs.
+//
+//   organisateur / admin → annulation appliquée directement.
+//     Les participants sont notifiés immédiatement.
 // ─────────────────────────────────────────────────────────────
 const annulerEvenement = async (req, res) => {
   try {
@@ -442,16 +481,52 @@ const annulerEvenement = async (req, res) => {
         return res.status(400).json({ success: false, message: `L'événement est déjà "${ev.stat_event}"` });
     }
 
-    // Passer l'événement en "annulé" avec la raison
+    // ── CAS 1 : créateur simple → soumettre pour confirmation ──
+    if (estCreateur && !estPrivilegie) {
+        if (ev.annulation_en_attente) {
+            return res.status(409).json({
+                success: false,
+                message: 'Une demande d\'annulation est déjà en attente de validation.',
+            });
+        }
+
+        await Evenement.findByIdAndUpdate(req.params.id, {
+            annulation_en_attente: true,
+            annulation_proposee: {
+                raison:       raison.trim(),
+                proposee_par: req.utilisateur._id,
+                proposee_le:  new Date(),
+            },
+        });
+
+        const adminsEtOrgas = await Utilisateur.find(
+            { role: { $in: ['admin', 'organisateur'] } }, '_id'
+        );
+        const notifDocs = adminsEtOrgas.map(u => ({
+            utilisateur: u._id,
+            evenement:   ev._id,
+            type:        'annulation_soumise',
+            titre:       `⚠️ Demande d'annulation — "${ev.title_event}"`,
+            message:     `${ev.createur.first_name} ${ev.createur.last_name} demande l'annulation de l'événement "${ev.title_event}". Raison : ${raison.trim()}. Validez ou refusez dans votre dashboard.`,
+        }));
+        await Notification.insertMany(notifDocs, { ordered: false }).catch(() => {});
+
+        return res.json({
+            success: true,
+            message: 'Demande d\'annulation soumise. Un organisateur ou administrateur la confirmera prochainement.',
+        });
+    }
+
+    // ── CAS 2 : organisateur/admin → application directe ──────
     await Evenement.findByIdAndUpdate(req.params.id, {
-        stat_event:        'annulé',
-        raison_annulation: raison.trim(),
-        // Effacer toute modification en attente
+        stat_event:             'annulé',
+        raison_annulation:      raison.trim(),
+        annulation_en_attente:  false,
+        annulation_proposee:    {},
         modification_en_attente: false,
         modification_proposee:   {},
     });
 
-    // Notifier tous les participants avec un message chaleureux et une excuse
     const nb = await notifierParticipants(
         ev._id,
         'evenement_annule',
@@ -462,13 +537,105 @@ const annulerEvenement = async (req, res) => {
             `Nous espérons vous retrouver très prochainement lors d'un prochain événement. Merci de votre compréhension ! 🙏`
     );
 
-    console.log(`🚫 Événement annulé : "${ev.title_event}" — ${nb} participant(s) notifié(s)`);
-    return res.json({
-        success: true,
-        message: `Événement annulé. ${nb} participant(s) notifié(s).`,
-    });
+    console.log(`🚫 Événement annulé directement par ${req.utilisateur.role} : "${ev.title_event}" — ${nb} participant(s) notifié(s)`);
+    return res.json({ success: true, message: `Événement annulé. ${nb} participant(s) notifié(s).` });
   } catch (error) {
     console.error('annulerEvenement:', error);
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/evenements/:id/approuver-annulation
+// Orga ou admin confirme l'annulation soumise par le créateur.
+// L'événement passe en 'annulé', participants notifiés.
+// ─────────────────────────────────────────────────────────────
+const approuverAnnulation = async (req, res) => {
+  try {
+    const ev = await Evenement.findById(req.params.id)
+        .populate('createur', 'first_name last_name _id');
+    if (!ev) return res.status(404).json({ success: false, message: 'Événement introuvable' });
+
+    if (!ev.annulation_en_attente) {
+        return res.status(400).json({ success: false, message: 'Aucune demande d\'annulation en attente' });
+    }
+
+    const raison = ev.annulation_proposee?.raison || 'Raison non précisée';
+
+    await Evenement.findByIdAndUpdate(req.params.id, {
+        stat_event:            'annulé',
+        raison_annulation:     raison,
+        annulation_en_attente: false,
+        annulation_proposee:   {},
+        modification_en_attente: false,
+        modification_proposee:   {},
+    });
+
+    // Notifier le créateur
+    await Notification.create({
+        utilisateur: ev.createur._id,
+        evenement:   ev._id,
+        type:        'annulation_approuvee',
+        titre:       `✅ Annulation confirmée — "${ev.title_event}"`,
+        message:     `${ev.createur.first_name}, votre demande d'annulation pour l'événement "${ev.title_event}" a été approuvée. Les participants ont été informés.`,
+    });
+
+    // Notifier les participants
+    const nb = await notifierParticipants(
+        ev._id,
+        'evenement_annule',
+        `😔 Événement annulé — "${ev.title_event}"`,
+        (prenom) =>
+            `Bonjour ${prenom}, nous sommes sincèrement désolés de vous informer que l'événement ` +
+            `"${ev.title_event}" a dû être annulé. Raison : ${raison}. ` +
+            `Nous espérons vous retrouver très prochainement ! 🙏`
+    );
+
+    console.log(`✅ Annulation approuvée : "${ev.title_event}" — ${nb} participant(s) notifié(s)`);
+    return res.json({ success: true, message: `Annulation approuvée. ${nb} participant(s) notifié(s).` });
+  } catch (error) {
+    console.error('approuverAnnulation:', error);
+    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/evenements/:id/refuser-annulation
+// Body : { raison } — obligatoire
+// L'événement reste publié. Le créateur est notifié.
+// ─────────────────────────────────────────────────────────────
+const refuserAnnulation = async (req, res) => {
+  try {
+    const { raison } = req.body;
+    if (!raison || !raison.trim()) {
+        return res.status(400).json({ success: false, message: 'La raison du refus est obligatoire' });
+    }
+
+    const ev = await Evenement.findById(req.params.id)
+        .populate('createur', 'first_name last_name _id');
+    if (!ev) return res.status(404).json({ success: false, message: 'Événement introuvable' });
+
+    if (!ev.annulation_en_attente) {
+        return res.status(400).json({ success: false, message: 'Aucune demande d\'annulation en attente' });
+    }
+
+    await Evenement.findByIdAndUpdate(req.params.id, {
+        annulation_en_attente: false,
+        annulation_proposee:   {},
+    });
+
+    await Notification.create({
+        utilisateur: ev.createur._id,
+        evenement:   ev._id,
+        type:        'annulation_refusee',
+        titre:       `❌ Demande d'annulation refusée — "${ev.title_event}"`,
+        message:     `${ev.createur.first_name}, votre demande d'annulation pour "${ev.title_event}" n'a pas été retenue. Raison : ${raison.trim()}. L'événement reste actif.`,
+    });
+
+    console.log(`❌ Annulation refusée : "${ev.title_event}"`);
+    return res.json({ success: true, message: 'Demande d\'annulation refusée, le créateur a été notifié' });
+  } catch (error) {
+    console.error('refuserAnnulation:', error);
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }
 };
@@ -697,5 +864,6 @@ module.exports = {
   supprimerEvenement, qrScan, getSuggestions, noterEvenement,
   // Cycle de vie
   annulerEvenement, approuverModification, refuserModification,
+  approuverAnnulation, refuserAnnulation,
   terminerEvenementsExpires,
 };

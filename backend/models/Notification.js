@@ -37,6 +37,7 @@ const notificationSchema = new mongoose.Schema({
             'modification_refusee',
             'evenement_annule',
             'evenement_termine',
+            'rappel_evenement',
         ],
         default: 'rappel_event',
     },

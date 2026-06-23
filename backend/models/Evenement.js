@@ -28,8 +28,14 @@ const evenementSchema = new mongoose.Schema({
     },
 
     ev_end_time: {
-        type: Date
-        // TODO: Ajouter une validation : ev_end_time > ev_start_time
+        type: Date,
+        validate: {
+            validator: function (value) {
+                if (!value || !this.ev_start_time) return true;
+                return value > this.ev_start_time;
+            },
+            message: 'La date de fin doit être postérieure à la date de début.'
+        }
     },
 
     stat_event: {

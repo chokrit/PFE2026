@@ -6,10 +6,16 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, isOrganisateur } = require('../middleware/auth');
-const Equipe = require('../models/Equipe');
-const Connexion = require('../models/Connexion');
+const Equipe        = require('../models/Equipe');
+const Connexion     = require('../models/Connexion');
 const Participation = require('../models/Participation');
-const Utilisateur = require('../models/Utilisateur');
+const Utilisateur   = require('../models/Utilisateur');
+const Evenement     = require('../models/Evenement');
+const Notification  = require('../models/Notification');
+
+// Service IA de formation d'équipes
+// Algorithme glouton avec score d'affinité (partenariat, likes, collaboration, niveau)
+const { genererEquipesSuggeres } = require('../services/iaEquipeService');
 
 // ── Helper : calculer niveau ──
 const niveau = (pts) => pts >= 500 ? 3 : pts >= 200 ? 2 : pts >= 50 ? 1 : 0;
@@ -211,6 +217,126 @@ router.delete('/:equipeId/membre/:userId', verifyToken, isOrganisateur, async (r
         if (!equipe) return res.status(404).json({ success: false, message: 'Équipe introuvable' });
         return res.json({ success: true, equipe });
     } catch (error) {
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// GET /api/equipes/suggestions/:eventId?tailleEquipe=4
+// isOrganisateur — suggestion IA d'équipes pour un événement
+//
+// Appelle le service iaEquipeService qui :
+//   1. Charge les participants inscrits à l'événement
+//   2. Charge toutes leurs connexions all-time (pas event-scoped)
+//   3. Calcule le score d'affinité entre chaque paire :
+//        score = partenariat×0.40 + likes×0.20
+//              + collaboration×0.25 + niveau×0.15
+//   4. Regroupe via algorithme glouton en respectant
+//      la règle d'exclusion (refus de partenariat = jamais ensemble)
+//
+// NE SAUVEGARDE RIEN — retourne uniquement la proposition.
+// Pour valider et sauvegarder, utiliser POST /api/equipes/manuelle
+// avec les membres choisis par l'organisateur.
+//
+// Query param :
+//   tailleEquipe — nombre de membres par équipe (défaut 4, min 2)
+// ─────────────────────────────────────────────────────────────
+router.get('/suggestions/:eventId', verifyToken, isOrganisateur, async (req, res) => {
+    try {
+        const tailleEquipe = parseInt(req.query.tailleEquipe) || 4;
+
+        if (tailleEquipe < 2) {
+            return res.status(400).json({
+                success: false,
+                message: 'La taille d\'équipe doit être d\'au moins 2 membres',
+            });
+        }
+
+        const resultat = await genererEquipesSuggeres(req.params.eventId, tailleEquipe);
+
+        return res.json({ success: true, ...resultat });
+    } catch (error) {
+        console.error('❌ Erreur suggestions équipes IA:', error.message);
+        // Retourner le message d'erreur métier (ex: "pas assez de participants")
+        return res.status(400).json({ success: false, message: error.message || 'Erreur serveur' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/equipes/valider-lot — isOrganisateur
+//
+// Sauvegarde TOUTES les équipes suggérées par l'IA en une seule
+// requête, puis envoie une notification (type 'systeme') à chaque
+// membre assigné.
+//
+// Body :
+//   {
+//     evenement_id : ObjectId,
+//     equipes      : [
+//       { nom, membres: [userId, ...], score_moyen }
+//     ]
+//   }
+//
+// Retourne les équipes créées avec leurs IDs en base.
+// ─────────────────────────────────────────────────────────────
+const COULEURS_EQUIPES = ['rouge', 'bleu', 'vert', 'jaune', 'orange', 'violet'];
+
+router.post('/valider-lot', verifyToken, isOrganisateur, async (req, res) => {
+    try {
+        const { equipes, evenement_id } = req.body;
+
+        if (!Array.isArray(equipes) || equipes.length === 0) {
+            return res.status(400).json({ success: false, message: 'equipes[] est requis et ne peut pas être vide' });
+        }
+        if (!evenement_id) {
+            return res.status(400).json({ success: false, message: 'evenement_id est requis' });
+        }
+
+        // Récupérer le titre de l'événement pour personnaliser les notifications
+        const ev = await Evenement.findById(evenement_id).select('title_event');
+        if (!ev) {
+            return res.status(404).json({ success: false, message: 'Événement introuvable' });
+        }
+
+        const equipesCreees = [];
+
+        for (let i = 0; i < equipes.length; i++) {
+            const eq = equipes[i];
+            const membres = eq.membres || [];
+            const nomEquipe = eq.nom || `Équipe ${i + 1}`;
+
+            // ── Créer l'équipe en base ────────────────────────
+            const equipe = await Equipe.create({
+                evenement:       evenement_id,
+                nom_equipe:      nomEquipe,
+                couleur:         COULEURS_EQUIPES[i % COULEURS_EQUIPES.length],
+                membres:         membres,
+                type_creation:   'automatique',
+                statut:          'validee',
+                valide_par:      req.utilisateur._id,
+            });
+            equipesCreees.push(equipe);
+
+            // ── Notifier chaque membre de son assignation ─────
+            for (const userId of membres) {
+                await Notification.create({
+                    utilisateur: userId,
+                    evenement:   evenement_id,
+                    type:        'systeme',
+                    titre:       `Équipe assignée — ${ev.title_event}`,
+                    message:     `Vous avez été assigné à l'équipe "${nomEquipe}" pour l'événement "${ev.title_event}". Bonne chance !`,
+                });
+            }
+        }
+
+        console.log(`✅ ${equipesCreees.length} équipes créées et membres notifiés — event ${evenement_id}`);
+        return res.status(201).json({
+            success:    true,
+            equipes:    equipesCreees,
+            nb_equipes: equipesCreees.length,
+        });
+    } catch (error) {
+        console.error('❌ Erreur valider-lot équipes:', error.message);
         return res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });

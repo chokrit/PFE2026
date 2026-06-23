@@ -97,6 +97,13 @@ const DashboardOrganisateur = () => {
     const [raisonRefusAnnul, setRaisonRefusAnnul] = useState('');
     const [savingAnnulAction, setSavingAnnulAction] = useState(false);
 
+    // ── Équipes IA ──────────────────────────────────────────────
+    const [equipeEventId, setEquipeEventId]     = useState('');   // événement choisi pour la génération
+    const [tailleEquipe, setTailleEquipe]       = useState(4);    // membres par équipe (min 2)
+    const [equipesSuggeres, setEquipesSuggeres] = useState([]);   // résultat IA non sauvegardé
+    const [loadingEquipes, setLoadingEquipes]   = useState(false);
+    const [savingEquipes, setSavingEquipes]     = useState(false);
+
     useEffect(() => {
         const token = localStorage.getItem('event_token');
         const user = localStorage.getItem('event_user');
@@ -159,6 +166,68 @@ const DashboardOrganisateur = () => {
     const notif = (type, msg) => {
         setNotification({ type, msg });
         setTimeout(() => setNotification(null), 3000);
+    };
+
+    // ── Équipes IA — génération ───────────────────────────────
+
+    // Appelle GET /api/equipes/suggestions/:eventId et stocke le résultat
+    // sans rien sauvegarder — prévisualisation pure
+    const genererEquipes = async () => {
+        if (!equipeEventId) return;
+        setLoadingEquipes(true);
+        setEquipesSuggeres([]);
+        try {
+            const res = await api.get(`/equipes/suggestions/${equipeEventId}?tailleEquipe=${tailleEquipe}`);
+            const eq = res.data.equipes_suggerees || [];
+            if (eq.length === 0) {
+                notif('error', 'Pas assez de participants pour former des équipes');
+            } else {
+                setEquipesSuggeres(eq);
+            }
+        } catch (err) {
+            notif('error', err.response?.data?.message || 'Erreur génération équipes');
+        } finally { setLoadingEquipes(false); }
+    };
+
+    // Retire un membre d'une équipe et le redistribue dans l'équipe
+    // avec le moins de membres (hors équipe source)
+    const retirerMembreEquipe = (eqIdx, membreId) => {
+        setEquipesSuggeres(prev => {
+            const equipes = prev.map(eq => ({ ...eq, membres: [...eq.membres] }));
+            const membre  = equipes[eqIdx].membres.find(m => String(m._id) === String(membreId));
+            equipes[eqIdx].membres = equipes[eqIdx].membres.filter(m => String(m._id) !== String(membreId));
+            if (membre && equipes.length > 1) {
+                // Choisir l'équipe avec le moins de membres parmi les autres
+                const cibleIdx = equipes.reduce((best, eq, i) => {
+                    if (i === eqIdx) return best;
+                    return eq.membres.length < equipes[best === eqIdx ? (eqIdx === 0 ? 1 : 0) : best].membres.length ? i : best;
+                }, eqIdx === 0 ? 1 : 0);
+                equipes[cibleIdx].membres.push(membre);
+            }
+            return equipes;
+        });
+    };
+
+    // Sauvegarde toutes les équipes via POST /api/equipes/valider-lot
+    // et envoie une notification à chaque membre (côté backend)
+    const validerEtNotifier = async () => {
+        if (!equipesSuggeres.length || !equipeEventId) return;
+        setSavingEquipes(true);
+        try {
+            await api.post('/equipes/valider-lot', {
+                evenement_id: equipeEventId,
+                equipes: equipesSuggeres.map(eq => ({
+                    nom:         eq.nom,
+                    membres:     eq.membres.map(m => m._id),
+                    score_moyen: eq.score_moyen,
+                })),
+            });
+            notif('success', `${equipesSuggeres.length} équipes validées — membres notifiés !`);
+            setEquipesSuggeres([]);
+            setEquipeEventId('');
+        } catch (err) {
+            notif('error', err.response?.data?.message || 'Erreur sauvegarde équipes');
+        } finally { setSavingEquipes(false); }
     };
 
     const creerEvent = async (e) => {
@@ -575,6 +644,7 @@ const DashboardOrganisateur = () => {
                         { key: 'mes-events',       label: t('myEvents') },
                         { key: 'scanner',          label: `📷 ${t('scanner')}` },
                         { key: 'participants',     label: t('participants') },
+                        { key: 'equipes',          label: '👥 Équipes IA' },
                         { key: 'categories',       label: `🏷 ${t('categories')}`, badge: suggestionsCats.length + suggestionLieux.length },
                         { key: 'explorer',         label: `🔍 ${t('explore')}` },
                         { key: 'mes-inscriptions', label: t('myRegistrations'), badge: mesInscriptions.length },
@@ -1282,6 +1352,159 @@ const DashboardOrganisateur = () => {
                                         </tbody>
                                     </table>
                                 </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ── ÉQUIPES IA ── */}
+                {activeTab === 'equipes' && (
+                    <div>
+                        <h2 className="dash-section-title" style={{ marginBottom: '1.5rem' }}>Formation automatique d'équipes</h2>
+
+                        {/* Sélecteur événement + paramètres */}
+                        <div style={{ background: '#12122a', border: '1px solid #2a2a4a', borderRadius: 14, padding: '1.25rem', marginBottom: 24 }}>
+                            <h3 style={{ fontSize: 13, fontWeight: 700, color: '#e8e8f0', marginBottom: 14 }}>
+                                Paramètres de génération
+                            </h3>
+                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                                <div style={{ flex: 2, minWidth: 200 }}>
+                                    <label style={{ display: 'block', fontSize: 12, color: '#8888aa', marginBottom: 6 }}>
+                                        Événement *
+                                    </label>
+                                    <select
+                                        value={equipeEventId}
+                                        onChange={e => { setEquipeEventId(e.target.value); setEquipesSuggeres([]); }}
+                                        style={{ width: '100%', background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 8, padding: '9px 12px', fontFamily: 'Poppins,sans-serif', fontSize: 13, boxSizing: 'border-box' }}
+                                    >
+                                        <option value="">— Sélectionner un événement —</option>
+                                        {mesEvents.filter(ev => ['publié', 'brouillon'].includes(ev.stat_event)).map(ev => (
+                                            <option key={ev._id} value={ev._id}>{ev.title_event}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div style={{ flex: 1, minWidth: 120 }}>
+                                    <label style={{ display: 'block', fontSize: 12, color: '#8888aa', marginBottom: 6 }}>
+                                        Membres / équipe
+                                    </label>
+                                    <input
+                                        type="number" min={2} max={20}
+                                        value={tailleEquipe}
+                                        onChange={e => setTailleEquipe(Math.max(2, parseInt(e.target.value) || 4))}
+                                        style={{ width: '100%', background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 8, padding: '9px 12px', fontFamily: 'Poppins,sans-serif', fontSize: 13, boxSizing: 'border-box' }}
+                                    />
+                                </div>
+                                <button
+                                    onClick={genererEquipes}
+                                    disabled={!equipeEventId || loadingEquipes}
+                                    style={{
+                                        padding: '10px 20px', borderRadius: 8, fontSize: 13,
+                                        fontFamily: 'Poppins,sans-serif', fontWeight: 600, cursor: !equipeEventId || loadingEquipes ? 'not-allowed' : 'pointer',
+                                        background: !equipeEventId || loadingEquipes ? '#1a1a35' : 'rgba(0,212,255,.12)',
+                                        color: !equipeEventId || loadingEquipes ? '#555577' : '#00d4ff',
+                                        border: `1px solid ${!equipeEventId || loadingEquipes ? '#2a2a4a' : 'rgba(0,212,255,.3)'}`,
+                                    }}
+                                >
+                                    {loadingEquipes ? '⏳ Calcul en cours...' : '🤖 Générer les équipes IA'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Résultat IA — affiché seulement si suggestions existent */}
+                        {equipesSuggeres.length > 0 && (
+                            <div>
+                                {/* Bandeau informatif */}
+                                <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(0,212,255,.06)', border: '1px solid rgba(0,212,255,.18)', borderRadius: 10, fontSize: 12, color: '#8888aa', display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ color: '#00d4ff', fontSize: 14 }}>ℹ</span>
+                                    Prévisualisation — rien n'est sauvegardé tant que vous ne cliquez pas sur "Valider".
+                                    Cliquez sur <strong style={{ color: '#e8e8f0' }}>✕</strong> pour retirer un membre (redistribué automatiquement).
+                                </div>
+
+                                {/* Grille des équipes */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14, marginBottom: 20 }}>
+                                    {equipesSuggeres.map((eq, eqIdx) => (
+                                        <div key={eqIdx} style={{ background: '#12122a', border: '1px solid #2a2a4a', borderRadius: 14, padding: '1rem' }}>
+                                            {/* En-tête : nom + score */}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                                <span style={{ fontSize: 13, fontWeight: 700, color: '#e8e8f0' }}>
+                                                    {eq.nom}
+                                                </span>
+                                                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: 'rgba(0,212,255,.1)', color: '#00d4ff', fontWeight: 700 }}>
+                                                    Score {Math.round((eq.score_moyen || 0) * 100)}%
+                                                </span>
+                                            </div>
+
+                                            {/* Membres */}
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                {eq.membres.map(m => (
+                                                    <div key={String(m._id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', background: '#0a0a1a', borderRadius: 8 }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                            {/* Avatar initiales */}
+                                                            <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#1a1a35', border: '1px solid #2a2a4a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#8888aa', flexShrink: 0 }}>
+                                                                {m.first_name?.[0]}{m.last_name?.[0]}
+                                                            </div>
+                                                            <div>
+                                                                <div style={{ fontSize: 12, color: '#e8e8f0', lineHeight: 1.2 }}>
+                                                                    {m.first_name} {m.last_name}
+                                                                </div>
+                                                                <div style={{ fontSize: 10, color: '#555577' }}>
+                                                                    {m.niveau} · {m.cumul_points} pts
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {/* Bouton retirer */}
+                                                        <button
+                                                            onClick={() => retirerMembreEquipe(eqIdx, m._id)}
+                                                            title="Retirer de cette équipe"
+                                                            style={{ background: 'none', border: 'none', color: '#555577', cursor: 'pointer', fontSize: 14, padding: '2px 6px', lineHeight: 1 }}
+                                                        >✕</button>
+                                                    </div>
+                                                ))}
+                                                {/* Avertissement équipe incomplète */}
+                                                {!eq.complet && (
+                                                    <div style={{ fontSize: 11, color: '#ff6b00', textAlign: 'center', padding: '4px 0' }}>
+                                                        ⚠ Équipe incomplète
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Actions */}
+                                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', paddingTop: 12, borderTop: '1px solid #2a2a4a' }}>
+                                    <button
+                                        onClick={() => setEquipesSuggeres([])}
+                                        className="dash-btn-ghost"
+                                        disabled={savingEquipes}
+                                    >
+                                        Annuler
+                                    </button>
+                                    <button
+                                        onClick={validerEtNotifier}
+                                        disabled={savingEquipes}
+                                        style={{
+                                            padding: '10px 20px', borderRadius: 8, fontSize: 13,
+                                            fontFamily: 'Poppins,sans-serif', fontWeight: 600,
+                                            cursor: savingEquipes ? 'not-allowed' : 'pointer',
+                                            background: savingEquipes ? '#1a1a35' : 'rgba(0,230,118,.12)',
+                                            color: savingEquipes ? '#555577' : '#00e676',
+                                            border: `1px solid ${savingEquipes ? '#2a2a4a' : 'rgba(0,230,118,.3)'}`,
+                                        }}
+                                    >
+                                        {savingEquipes ? '⏳ Sauvegarde...' : '✅ Valider et notifier les membres'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* État vide initial */}
+                        {!loadingEquipes && equipesSuggeres.length === 0 && (
+                            <div className="dash-empty">
+                                <p className="dash-empty__icon">👥</p>
+                                <p className="dash-empty__text">
+                                    Sélectionnez un événement et cliquez sur "Générer" pour obtenir des suggestions d'équipes basées sur les affinités des participants.
+                                </p>
                             </div>
                         )}
                     </div>

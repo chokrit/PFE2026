@@ -35,6 +35,7 @@ const DashboardUser = () => {
   const [evenementsDispos, setEvenementsDispos] = useState([]);
   const [mesCreations, setMesCreations] = useState([]);
   const [mesRecompenses, setMesRecompenses] = useState([]);
+  const [suggestions, setSuggestions]       = useState([]);
   const [locations, setLocations] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +43,13 @@ const DashboardUser = () => {
   const [qrModal, setQrModal] = useState(null);
   const [galerieOpen, setGalerieOpen] = useState(false);
   const [notif, setNotif] = useState(null);
+
+  // ── Galerie par événement ─────────────────────────────────
+  const [galerieEvent, setGalerieEvent]   = useState(null);   // { eventId, titre } ou null
+  const [photosEvent, setPhotosEvent]     = useState([]);      // médias approuvés de l'événement ouvert
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const [uploading, setUploading]         = useState(false);
+  const [lightboxIdx, setLightboxIdx]     = useState(null);    // index image agrandie
 
   // Formulaire création
   const [modalCreer, setModalCreer] = useState(false);
@@ -80,16 +88,18 @@ const DashboardUser = () => {
   const charger = async () => {
     setLoading(true);
     try {
-      const [insc, evs, crea, locs, cats] = await Promise.allSettled([
+      const [insc, evs, crea, sugg, locs, cats] = await Promise.allSettled([
         api.get('/participations/mes-inscriptions'),
         api.get('/evenements'),
         api.get('/evenements/mes-evenements'),
+        api.get('/evenements/suggestions'),          // module IA — suggestions personnalisées
         api.get('/locations'),
         api.get('/categories'),
       ]);
       if (insc.status === 'fulfilled') setMesInscriptions(insc.value.data.participations || []);
       if (evs.status === 'fulfilled') setEvenementsDispos(evs.value.data.evenements || []);
       if (crea.status === 'fulfilled') setMesCreations(crea.value.data.evenements || []);
+      if (sugg.status === 'fulfilled') setSuggestions(sugg.value.data.suggestions || []);
       if (locs.status === 'fulfilled') setLocations(locs.value.data.locations || []);
       if (cats.status === 'fulfilled') setCategories(cats.value.data.categories || []);
       try {
@@ -173,6 +183,53 @@ const DashboardUser = () => {
   const flash = (type, message) => {
     setNotif({ type, message });
     setTimeout(() => setNotif(null), 4000);
+  };
+
+  // ── Galerie par événement ─────────────────────────────────
+
+  // Ouvre la modale et charge les photos de l'événement
+  const ouvrirGalerieEvent = async (eventId, titre) => {
+    setGalerieEvent({ eventId, titre });
+    setPhotosEvent([]);
+    await chargerPhotosEvent(eventId);
+  };
+
+  // Charge les médias approuvés depuis /api/medias/evenement/:id
+  const chargerPhotosEvent = async (eventId) => {
+    setLoadingPhotos(true);
+    try {
+      const res = await api.get(`/medias/evenement/${eventId}`);
+      setPhotosEvent(res.data.medias || []);
+    } catch { setPhotosEvent([]); }
+    finally { setLoadingPhotos(false); }
+  };
+
+  // Upload d'une photo via FormData → POST /api/medias/upload
+  // Le backend vérifie que l'utilisateur est bien inscrit à l'événement
+  const uploaderPhoto = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !galerieEvent) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('photo', file);                          // champ attendu par multer
+      fd.append('evenement_id', galerieEvent.eventId);   // requis pour photo_evenement
+      fd.append('type_media', 'photo_evenement');
+      await api.post('/medias/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      flash('success', 'Photo envoyée — elle sera visible après validation');
+      await chargerPhotosEvent(galerieEvent.eventId);
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur upload photo');
+    } finally {
+      setUploading(false);
+      e.target.value = '';   // reset input pour permettre le même fichier deux fois
+    }
+  };
+
+  const fermerGalerieEvent = () => {
+    setGalerieEvent(null);
+    setPhotosEvent([]);
+    setLightboxIdx(null);
   };
 
   const getNiveau = (pts) => {
@@ -402,9 +459,27 @@ const DashboardUser = () => {
             ) : (
               <div className="dash-events-grid">
                 {mesInscriptions.map(ins => (
-                  <EventCard key={ins.id} event={ins} mode="inscrit"
-                    onVoirQR={() => setQrModal({ eventId: ins.eventId, token: ins.qr_token, titre: ins.titre })}
-                    onAnnuler={() => annulerInscription(ins.eventId)} />
+                  // Wrapper pour grouper la carte + le bouton galerie
+                  <div key={ins.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <EventCard event={ins} mode="inscrit"
+                      onVoirQR={() => setQrModal({ eventId: ins.eventId, token: ins.qr_token, titre: ins.titre })}
+                      onAnnuler={() => annulerInscription(ins.eventId)} />
+                    {/* Bouton d'accès à la galerie photos de cet événement */}
+                    <button
+                      onClick={() => ouvrirGalerieEvent(ins.eventId, ins.titre)}
+                      style={{
+                        width: '100%', padding: '8px 12px',
+                        background: 'rgba(0,212,255,.07)',
+                        border: '1px solid rgba(0,212,255,.2)',
+                        borderRadius: '8px', color: '#00d4ff',
+                        fontSize: '12px', cursor: 'pointer',
+                        fontFamily: 'Poppins,sans-serif',
+                        display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', gap: '6px',
+                      }}>
+                      📸 Photos de l'événement
+                    </button>
+                  </div>
                 ))}
               </div>
             )
@@ -412,24 +487,66 @@ const DashboardUser = () => {
 
           {/* ── Explorer ── */}
           {activeTab === 'explorer' && (
-            evenementsDispos.length === 0 ? (
-              <div className="dash-empty">
-                <p className="dash-empty__icon">📅</p>
-                <p className="dash-empty__text">Aucun événement disponible.</p>
-                <button className="dash-btn-primary" onClick={ouvrirModalCreer}>
-                  + Proposer le premier événement
-                </button>
-              </div>
-            ) : (
-              <div className="dash-events-grid">
-                {evenementsDispos.map(ev => (
-                  <EventCard key={ev._id} event={{ ...ev, id: ev._id }} mode="explorer"
-                    estInscrit={inscritIds.has(String(ev._id))}
-                    onSInscrire={() => sInscrire(ev._id)}
-                    onSeDesinscrire={() => annulerInscription(ev._id)} />
-                ))}
-              </div>
-            )
+            <div>
+              {/* ── Section IA : masquée si vide, sans aucun message d'absence ── */}
+              {suggestions.length > 0 && (
+                <div style={{ marginBottom: 28 }}>
+                  <div style={{ marginBottom: 14 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: '#a78bfa', marginBottom: 4 }}>
+                      🎯 Recommandé pour vous
+                    </h3>
+                    <p style={{ fontSize: 12, color: '#8888aa', margin: 0 }}>
+                      Basé sur vos sports favoris et vos amis
+                    </p>
+                  </div>
+                  <div className="dash-events-grid">
+                    {suggestions.slice(0, 5).map(ev => (
+                      <div key={ev._id} style={{ position: 'relative' }}>
+                        {/* Badge score IA — superposé en haut à droite de la carte */}
+                        <span style={{
+                          position: 'absolute', top: 8, right: 8, zIndex: 1,
+                          background: 'rgba(167,139,250,.15)',
+                          color: '#a78bfa',
+                          fontSize: 10, padding: '2px 8px', borderRadius: 99,
+                          fontWeight: 700, border: '1px solid rgba(167,139,250,.3)',
+                          pointerEvents: 'none',
+                        }}>
+                          ✨ {Math.round((ev.score || 0) * 100)}% match
+                        </span>
+                        <EventCard
+                          event={{ ...ev, id: ev._id }}
+                          mode="explorer"
+                          estInscrit={inscritIds.has(String(ev._id))}
+                          onSInscrire={() => sInscrire(ev._id)}
+                          onSeDesinscrire={() => annulerInscription(ev._id)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <hr style={{ border: 'none', borderTop: '1px solid #2a2a4a', margin: '24px 0 0' }} />
+                </div>
+              )}
+
+              {/* ── Liste générale — inchangée ── */}
+              {evenementsDispos.length === 0 ? (
+                <div className="dash-empty">
+                  <p className="dash-empty__icon">📅</p>
+                  <p className="dash-empty__text">Aucun événement disponible.</p>
+                  <button className="dash-btn-primary" onClick={ouvrirModalCreer}>
+                    + Proposer le premier événement
+                  </button>
+                </div>
+              ) : (
+                <div className="dash-events-grid">
+                  {evenementsDispos.map(ev => (
+                    <EventCard key={ev._id} event={{ ...ev, id: ev._id }} mode="explorer"
+                      estInscrit={inscritIds.has(String(ev._id))}
+                      onSInscrire={() => sInscrire(ev._id)}
+                      onSeDesinscrire={() => annulerInscription(ev._id)} />
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {/* ── Mes créations ── */}
@@ -522,6 +639,159 @@ const DashboardUser = () => {
 
       {qrModal && <QRModal token={qrModal.token} titre={qrModal.titre} onClose={() => setQrModal(null)} />}
       {galerieOpen && <GalerieModal onClose={() => setGalerieOpen(false)} isAdmin={false} />}
+
+      {/* ── Modale galerie d'un événement spécifique ── */}
+      {galerieEvent && (
+        <div className="dash-overlay" onClick={fermerGalerieEvent}>
+          <div
+            className="dash-modal"
+            style={{ maxWidth: '760px', width: '95vw' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* En-tête */}
+            <div className="dash-modal__header">
+              <h3 style={{ fontSize: '15px', maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                📸 {galerieEvent.titre}
+              </h3>
+              <button className="dash-modal__close" onClick={fermerGalerieEvent}>✕</button>
+            </div>
+
+            {/* Zone d'upload */}
+            <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #2a2a4a' }}>
+              <label style={{
+                display: 'inline-flex', alignItems: 'center', gap: '8px',
+                padding: '8px 16px',
+                background: uploading ? '#1a1a35' : 'rgba(0,212,255,.1)',
+                border: '1px solid rgba(0,212,255,.25)',
+                borderRadius: '8px',
+                color: uploading ? '#555577' : '#00d4ff',
+                fontSize: '13px',
+                cursor: uploading ? 'not-allowed' : 'pointer',
+                fontFamily: 'Poppins,sans-serif',
+              }}>
+                {uploading ? '⏳ Upload en cours...' : '+ Ajouter une photo'}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+                  style={{ display: 'none' }}
+                  disabled={uploading}
+                  onChange={uploaderPhoto}
+                />
+              </label>
+              <p style={{ marginTop: '8px', fontSize: '11px', color: '#8888aa' }}>
+                JPG · PNG · WEBP (max 5 Mo) — soumis à validation avant publication.
+              </p>
+            </div>
+
+            {/* Grille de photos */}
+            <div style={{ padding: '1rem 1.5rem', maxHeight: '60vh', overflowY: 'auto' }}>
+              {loadingPhotos ? (
+                <div style={{ textAlign: 'center', color: '#8888aa', padding: '2rem' }}>
+                  <div className="dash-spinner" style={{ margin: '0 auto 1rem' }}></div>
+                  Chargement des photos...
+                </div>
+              ) : photosEvent.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#8888aa', padding: '2rem' }}>
+                  <p style={{ fontSize: '36px', marginBottom: '10px' }}>📷</p>
+                  <p style={{ marginBottom: '4px' }}>Aucune photo pour cet événement.</p>
+                  <p style={{ fontSize: '12px' }}>Soyez le premier à partager un souvenir !</p>
+                </div>
+              ) : (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                  gap: '8px',
+                }}>
+                  {photosEvent.map((m, idx) => (
+                    <div
+                      key={m._id}
+                      onClick={() => setLightboxIdx(idx)}
+                      style={{
+                        position: 'relative', cursor: 'zoom-in',
+                        borderRadius: '8px', overflow: 'hidden',
+                        border: '1px solid #2a2a4a',
+                        aspectRatio: '1', background: '#0a0a1a',
+                      }}
+                    >
+                      <img
+                        src={m.thumbnail_url || m.file_url}
+                        alt=""
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                      {/* Auteur en bas de vignette */}
+                      <div style={{
+                        position: 'absolute', bottom: 0, left: 0, right: 0,
+                        padding: '4px 6px',
+                        background: 'linear-gradient(transparent, rgba(0,0,0,.75))',
+                        fontSize: '10px', color: '#ccc',
+                      }}>
+                        {m.utilisateur?.first_name} {m.utilisateur?.last_name?.[0]}.
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Lightbox plein écran ── */}
+      {lightboxIdx !== null && photosEvent[lightboxIdx] && (
+        <div
+          onClick={() => setLightboxIdx(null)}
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,.93)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 9999, padding: '1rem',
+          }}
+        >
+          {/* Précédent */}
+          {lightboxIdx > 0 && (
+            <button
+              onClick={e => { e.stopPropagation(); setLightboxIdx(i => i - 1); }}
+              style={{
+                position: 'fixed', left: '1rem', top: '50%', transform: 'translateY(-50%)',
+                background: 'rgba(255,255,255,.15)', border: 'none', color: '#fff',
+                borderRadius: '50%', width: 44, height: 44, fontSize: '22px',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >‹</button>
+          )}
+
+          <img
+            src={photosEvent[lightboxIdx].file_url}
+            alt=""
+            onClick={e => e.stopPropagation()}
+            style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '8px', objectFit: 'contain' }}
+          />
+
+          {/* Suivant */}
+          {lightboxIdx < photosEvent.length - 1 && (
+            <button
+              onClick={e => { e.stopPropagation(); setLightboxIdx(i => i + 1); }}
+              style={{
+                position: 'fixed', right: '1rem', top: '50%', transform: 'translateY(-50%)',
+                background: 'rgba(255,255,255,.15)', border: 'none', color: '#fff',
+                borderRadius: '50%', width: 44, height: 44, fontSize: '22px',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >›</button>
+          )}
+
+          {/* Fermer */}
+          <button
+            onClick={() => setLightboxIdx(null)}
+            style={{
+              position: 'fixed', top: '1rem', right: '1rem',
+              background: 'rgba(255,255,255,.15)', border: 'none', color: '#fff',
+              borderRadius: '50%', width: 36, height: 36, fontSize: '16px',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >✕</button>
+        </div>
+      )}
     </div>
   );
 };

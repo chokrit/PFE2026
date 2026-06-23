@@ -18,7 +18,13 @@ const Review        = require('../models/Review');
 const Connexion     = require('../models/Connexion');
 const Notification  = require('../models/Notification');
 const crypto        = require('crypto');
-const { verifierChevauchement } = require('../utils/chevauchement');
+const { verifierChevauchement }        = require('../utils/chevauchement');
+
+// ── Services IA ───────────────────────────────────────────────
+// iaSuggestionService : formule pondérée de recommandation d'événements
+const { getSuggestionsPourUtilisateur } = require('../services/iaSuggestionService');
+// iaFiabiliteService  : recalcul du score de fiabilité après chaque scan QR
+const { recalculerFiabilite }           = require('../services/iaFiabiliteService');
 
 // ── Helper : envoyer une notification à tous les participants d'un événement ──
 // Utilisé par annulerEvenement, approuverModification, etc.
@@ -144,6 +150,13 @@ const creerEvenement = async (req, res) => {
       });
     }
 
+    if (ev_end_time && new Date(ev_end_time) <= new Date(ev_start_time)) {
+      return res.status(400).json({
+        success: false,
+        message: 'La date de fin doit être postérieure à la date de début.',
+      });
+    }
+
     // ── Vérification de chevauchement ──
     const conflit = await verifierChevauchement(
       req.utilisateur._id,
@@ -242,6 +255,9 @@ const modifierEvenement = async (req, res) => {
         if (ev_start_time || ev_end_time) {
             const newStart = ev_start_time ? new Date(ev_start_time) : ev.ev_start_time;
             const newEnd   = ev_end_time   ? new Date(ev_end_time)   : ev.ev_end_time;
+            if (newEnd && newEnd <= newStart) {
+                return res.status(400).json({ success: false, message: 'La date de fin doit être postérieure à la date de début.' });
+            }
             const conflit  = await verifierChevauchement(req.utilisateur._id, newStart, newEnd, req.params.id);
             if (conflit) {
                 return res.status(409).json({ success: false, message: conflit.message });
@@ -293,6 +309,9 @@ const modifierEvenement = async (req, res) => {
     if (ev_start_time || ev_end_time) {
         const newStart = ev_start_time ? new Date(ev_start_time) : ev.ev_start_time;
         const newEnd   = ev_end_time   ? new Date(ev_end_time)   : ev.ev_end_time;
+        if (newEnd && newEnd <= newStart) {
+            return res.status(400).json({ success: false, message: 'La date de fin doit être postérieure à la date de début.' });
+        }
         const conflit  = await verifierChevauchement(ev.createur._id, newStart, newEnd, req.params.id);
         if (conflit) {
             return res.status(409).json({
@@ -722,15 +741,16 @@ const qrScan = async (req, res) => {
         ? (new Date(ev.ev_end_time) - new Date(ev.ev_start_time)) / (1000 * 60 * 60)
         : 1;
 
-      // Calculer score fiabilité
-      const totalInscriptions = await Participation.countDocuments({ utilisateur: req.utilisateur._id });
-      const totalPresences = await Participation.countDocuments({ utilisateur: req.utilisateur._id, is_present: true });
-      const reliabilite = totalInscriptions > 0 ? Math.round((totalPresences / totalInscriptions) * 100) : 100;
-
+      // Incrémenter les compteurs de gamification (heures de sport + points)
+      // reliabilite_score est mis à jour séparément par le service IA ci-dessous
       await Utilisateur.findByIdAndUpdate(req.utilisateur._id, {
         $inc: { cumul_heures_participation: Math.round(heures * 10) / 10, cumul_points: 10 },
-        reliabilite_score: reliabilite,
       });
+
+      // Recalculer le score de fiabilité via le service IA (formule centralisée)
+      // Formule : (nb_presences / nb_inscriptions) × 100
+      // Définie dans services/iaFiabiliteService.js pour réutilisation future
+      await recalculerFiabilite(req.utilisateur._id);
 
       // Mettre à jour ou créer l'interest pour chaque catégorie de l'événement
       for (const cat of (ev.categories || [])) {
@@ -751,62 +771,29 @@ const qrScan = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────────
-// GET /api/evenements/suggestions — Événements recommandés
-// Score pondéré par catégorie, connexions, note, fiabilité orga
+// GET /api/evenements/suggestions — Événements recommandés (IA)
+//
+// Délègue entièrement le calcul à iaSuggestionService.
+// Formule détaillée dans services/iaSuggestionService.js :
+//   score = affinite_categorie×0.35 + presence_sociale×0.30
+//         + reputation_event×0.20   + fiabilite_org×0.15
 // ─────────────────────────────────────────────────────────────
 const getSuggestions = async (req, res) => {
   try {
-    const moi = req.utilisateur._id;
-    const maintenant = new Date();
+    // Calculer les scores via le service IA (5 suggestions par défaut)
+    const resultats = await getSuggestionsPourUtilisateur(req.utilisateur._id, 5);
 
-    const evs = await Evenement.find({ stat_event: 'publié', ev_start_time: { $gt: maintenant } })
-      .populate('categories', '_id')
-      .populate('createur', 'reliabilite_score')
-      .limit(50);
-
-    // Mes intérêts avec nb_participations
-    const mesInterests = await Interest.find({ utilisateur: moi });
-    const interestMap = {};
-    mesInterests.forEach(i => { interestMap[i.categorie.toString()] = i.nb_participations; });
-
-    // Mes connexions acceptées
-    const mesConnexions = await Connexion.find({
-      $or: [{ demandeur: moi }, { receveur: moi }],
-      type: 'partenaire', statut: 'accepte',
-    });
-    const idConnexions = mesConnexions.map(c =>
-      c.demandeur.toString() === moi.toString() ? c.receveur.toString() : c.demandeur.toString()
+    // Formater chaque événement pour le frontend
+    // (ajoute nb_inscrits, lieu, categorie — via la fonction formater locale)
+    const suggestions = await Promise.all(
+      resultats.map(async ({ ev, score_total, detail }) => ({
+        ...(await formater(ev)),
+        score:        score_total,  // score global entre 0.0 et 1.0
+        score_detail: detail,       // détail par paramètre (debug / "Pourquoi ce conseil ?")
+      }))
     );
 
-    const scores = await Promise.all(evs.map(async (ev) => {
-      // Score catégorie (35%)
-      const maxPart = Math.max(...(ev.categories || []).map(c => interestMap[c._id.toString()] || 0), 0);
-      const scoreCat = Math.min(maxPart / 10, 1) * 0.35;
-
-      // Score connexions inscrites (30%)
-      const nb_inscrits = await Participation.countDocuments({ evenement: ev._id });
-      const inscrisConnectes = nb_inscrits > 0
-        ? await Participation.countDocuments({ evenement: ev._id, utilisateur: { $in: idConnexions } })
-        : 0;
-      const scoreCx = Math.min(inscrisConnectes / 3, 1) * 0.30;
-
-      // Score note moyenne événement (20%) — via Review si disponible
-      let scoreNote = 0.10; // neutre par défaut
-
-      // Score fiabilité organisateur (15%)
-      const fiab = ev.createur?.reliabilite_score ?? 80;
-      const scoreOrga = (fiab / 100) * 0.15;
-
-      return { ev, score: scoreCat + scoreCx + scoreNote + scoreOrga };
-    }));
-
-    const top5 = scores.sort((a, b) => b.score - a.score).slice(0, 5);
-    const resultats = await Promise.all(top5.map(async ({ ev, score }) => ({
-      ...(await formater(ev)),
-      score,
-    })));
-
-    return res.json({ success: true, suggestions: resultats });
+    return res.json({ success: true, suggestions });
   } catch (error) {
     console.error('getSuggestions:', error.message);
     return res.status(500).json({ success: false, message: 'Erreur serveur' });

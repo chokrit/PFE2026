@@ -73,7 +73,7 @@ const EventCard = ({ event, mode, onVoirQR, onSInscrire, onAnnuler, estInscrit, 
       <div className="event-card__info">
         <div className="event-card__info-row">
           <span className="event-card__info-icon">📅</span>
-          <span>{formatDate(event.date || event.ev_start_time)} à {formatHeure(event.date || event.ev_start_time)}</span>
+          <span style={{ color: 'var(--dash-gold)' }}>{formatDate(event.date || event.ev_start_time)} à {formatHeure(event.date || event.ev_start_time)}</span>
         </div>
         <div className="event-card__info-row">
           <span className="event-card__info-icon">📍</span>

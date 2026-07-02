@@ -12,6 +12,7 @@ import '../../styles/dashboard/dashboard.css';
 import '../../styles/dashboard/organisateur.css';
 import { fmtDate, fmtHeure, fmtDateHeure } from '../../utils/dates';
 import GalerieModal from '../../components/dashboard/GalerieModal';
+import ParticipantsModal from '../../components/dashboard/ParticipantsModal';
 
 const mkDates = () => {
   const p = n => String(n).padStart(2, '0');
@@ -63,6 +64,7 @@ const DashboardOrganisateur = () => {
     const [mesRecompenses, setMesRecompenses]     = useState([]);
     const [suggestions, setSuggestions]           = useState([]);
     const [qrModal, setQrModal]                   = useState(null);
+    const [participantsModal, setParticipantsModal] = useState(null);
 
     // ── Gestion des catégories / suggestions de sports ───────
     const [suggestionsCats, setSuggestionsCats]   = useState([]);
@@ -613,7 +615,15 @@ const DashboardOrganisateur = () => {
                     >
                         👤 Mon compte
                     </button>
-                    <span className="dash-username">{organisateur?.first_name}</span>
+                    <div className="dash-user-chip">
+                        <div className="dash-avatar" style={{ overflow: 'hidden', padding: organisateur?.photo ? 0 : undefined }}>
+                            {organisateur?.photo
+                                ? <img src={organisateur.photo} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                : <>{organisateur?.first_name?.[0]}{organisateur?.last_name?.[0]}</>
+                            }
+                        </div>
+                        <span className="dash-username">{organisateur?.first_name}</span>
+                    </div>
                     <button
                         className="dash-btn-ghost"
                         onClick={() => setGalerieOpen(true)}
@@ -1744,6 +1754,8 @@ const DashboardOrganisateur = () => {
                                                 onClick={() => setQrModal({ eventId: ins.eventId, token: ins.qr_token, titre: ins.titre, qr_utilise: ins.qr_utilise })}>
                                                 {ins.qr_utilise ? '✅ QR scanné' : '📱 QR'}
                                             </button>
+                                            <button className="dash-btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
+                                                onClick={() => setParticipantsModal(ins.eventId)}>👥 Participants</button>
                                             <button onClick={() => annulerInscription(ins.eventId)}
                                                 style={{ fontSize: 12, padding: '5px 10px', background: 'rgba(255,77,109,.1)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
                                                 Annuler
@@ -1837,6 +1849,7 @@ const DashboardOrganisateur = () => {
 
             </main>
             {qrModal && <QRModal token={qrModal.token} titre={qrModal.titre} qr_utilise={qrModal.qr_utilise} onClose={() => setQrModal(null)} />}
+            {participantsModal && <ParticipantsModal evenementId={participantsModal} onClose={() => setParticipantsModal(null)} />}
 
             {/* ── MODAL ANNULATION ÉVÉNEMENT (orga/admin) ── */}
             {modalAnnulerEv && (

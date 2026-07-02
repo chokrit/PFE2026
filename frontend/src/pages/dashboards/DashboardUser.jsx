@@ -19,6 +19,8 @@ import EventCard from '../../components/dashboard/EventCard';
 import RewardCard from '../../components/dashboard/RewardCard';
 import QRModal from '../../components/dashboard/QRModal';
 import GalerieModal from '../../components/dashboard/GalerieModal';
+import MonEspaceModal from '../../components/dashboard/MonEspaceModal';
+import ParticipantsModal from '../../components/dashboard/ParticipantsModal';
 import '../../styles/dashboard/dashboard.css';
 
 const toDatetimeLocal = (d) => {
@@ -41,6 +43,7 @@ const DashboardUser = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('inscrits');
   const [qrModal, setQrModal] = useState(null);
+  const [participantsModal, setParticipantsModal] = useState(null);
   const [galerieOpen, setGalerieOpen] = useState(false);
   const [notif, setNotif] = useState(null);
 
@@ -54,6 +57,14 @@ const DashboardUser = () => {
   // Formulaire création
   const [modalCreer, setModalCreer] = useState(false);
   const [savingEvent, setSavingEvent] = useState(false);
+
+  // ── Mon compte (modal) ───────────────────────────────────
+  const [showMonEspace, setShowMonEspace] = useState(false);
+
+  // ── Mon profil (onglet) ──────────────────────────────────
+  const [profilForm, setProfilForm] = useState({ first_name: '', last_name: '', telephone: '', langue: 'fr' });
+  const [savingProfil, setSavingProfil] = useState(false);
+
   const [form, setForm] = useState({
     title_event: '', event_description: '', ev_start_time: '',
     ev_end_time: '', max_participants: 10, location: '', categories: [],
@@ -80,6 +91,7 @@ const DashboardUser = () => {
       const u = JSON.parse(user);
       if (u.role === 'admin') { navigate('/admin'); return; }
       setUtilisateur(u);
+      setProfilForm({ first_name: u.first_name || '', last_name: u.last_name || '', telephone: u.telephone || '', langue: u.langue || 'fr' });
     }
     charger();
   }, [navigate]);
@@ -113,6 +125,22 @@ const DashboardUser = () => {
     localStorage.removeItem('event_token');
     localStorage.removeItem('event_user');
     navigate('/login');
+  };
+
+  const sauvegarderProfil = async (e) => {
+    e.preventDefault();
+    setSavingProfil(true);
+    try {
+      const res = await api.put('/utilisateurs/profil', profilForm);
+      const updated = res.data.utilisateur;
+      const stored = { ...utilisateur, ...updated };
+      localStorage.setItem('event_user', JSON.stringify(stored));
+      setUtilisateur(stored);
+      setProfilForm({ ...profilForm, ...updated });
+      flash('success', 'Profil mis à jour');
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur mise à jour profil');
+    } finally { setSavingProfil(false); }
   };
 
   const sInscrire = async (eventId) => {
@@ -379,12 +407,23 @@ const DashboardUser = () => {
             <span>{niveau.label}</span>
           </div>
           <div className="dash-user-chip">
-            <div className="dash-avatar">
-              {utilisateur?.first_name?.[0]}{utilisateur?.last_name?.[0]}
+            <div className="dash-avatar" style={{ overflow: 'hidden', padding: utilisateur?.photo ? 0 : undefined }}>
+              {utilisateur?.photo
+                ? <img src={utilisateur.photo} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                : <>{utilisateur?.first_name?.[0]}{utilisateur?.last_name?.[0]}</>
+              }
             </div>
             <span className="dash-username">{utilisateur?.first_name} {utilisateur?.last_name}</span>
           </div>
           <button className="dash-btn-ghost" onClick={() => setGalerieOpen(true)}>📸 Galerie</button>
+          <button
+            className="dash-btn-ghost"
+            onClick={() => setShowMonEspace(true)}
+            title="Modifier vos informations personnelles et votre mot de passe"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            👤 Mon compte
+          </button>
           <button className="dash-btn-logout" onClick={handleLogout}>Déconnexion</button>
         </div>
       </header>
@@ -434,6 +473,7 @@ const DashboardUser = () => {
             { key: 'explorer', label: 'Explorer', count: evenementsDispos.length, color: '' },
             { key: 'creations', label: 'Mes créations', count: mesCreations.length, color: '#9c27b0' },
             { key: 'recompenses', label: 'Récompenses', count: mesRecompenses.filter(r => !r.is_redeemed).length, color: '#ff6b00' },
+            { key: 'profil',      label: 'Mon profil',  count: 0, color: '' },
           ].map(t => (
             <button key={t.key} className={`dash-tab ${activeTab === t.key ? 'active' : ''}`} onClick={() => setActiveTab(t.key)}>
               {t.label}
@@ -464,6 +504,20 @@ const DashboardUser = () => {
                     <EventCard event={ins} mode="inscrit"
                       onVoirQR={() => setQrModal({ eventId: ins.eventId, token: ins.qr_token, titre: ins.titre })}
                       onAnnuler={() => annulerInscription(ins.eventId)} />
+                    <button
+                      onClick={() => setParticipantsModal(ins.eventId)}
+                      style={{
+                        width: '100%', padding: '8px 12px',
+                        background: 'rgba(167,139,250,.07)',
+                        border: '1px solid rgba(167,139,250,.2)',
+                        borderRadius: '8px', color: '#a78bfa',
+                        fontSize: '12px', cursor: 'pointer',
+                        fontFamily: 'Poppins,sans-serif',
+                        display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', gap: '6px',
+                      }}>
+                      👥 Participants
+                    </button>
                     {/* Bouton d'accès à la galerie photos de cet événement */}
                     <button
                       onClick={() => ouvrirGalerieEvent(ins.eventId, ins.titre)}
@@ -634,10 +688,84 @@ const DashboardUser = () => {
               </div>
             )
           )}
+
+          {/* ── Mon profil ── */}
+          {activeTab === 'profil' && (
+            <div style={{ maxWidth: '520px' }}>
+              <h2 className="dash-section-title" style={{ marginBottom: '1.5rem' }}>Mon profil</h2>
+              <div className="orga-form-card">
+                <form onSubmit={sauvegarderProfil} className="admin-form">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Prénom *</label>
+                      <input type="text" value={profilForm.first_name}
+                        onChange={e => setProfilForm({ ...profilForm, first_name: e.target.value })} required />
+                    </div>
+                    <div className="form-group">
+                      <label>Nom *</label>
+                      <input type="text" value={profilForm.last_name}
+                        onChange={e => setProfilForm({ ...profilForm, last_name: e.target.value })} required />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label>Téléphone</label>
+                    <input type="tel" value={profilForm.telephone}
+                      onChange={e => setProfilForm({ ...profilForm, telephone: e.target.value })}
+                      placeholder="+216 XX XXX XXX" />
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Langue</label>
+                      <select value={profilForm.langue}
+                        onChange={e => setProfilForm({ ...profilForm, langue: e.target.value })}
+                        style={{ background: '#1a1a35', color: '#e8e8f0', cursor: 'pointer' }}>
+                        <option value="fr">Français</option>
+                        <option value="en">English</option>
+                        <option value="ar">العربية</option>
+                        <option value="ar-tn">تونسي</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '1rem' }}>
+                    <button type="submit" className="dash-btn-primary" disabled={savingProfil}>
+                      {savingProfil ? 'Enregistrement...' : 'Sauvegarder'}
+                    </button>
+                  </div>
+                </form>
+
+                <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid #2a2a4a' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '1rem', color: '#8888aa' }}>Mes statistiques</h3>
+                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: '110px', background: '#0a0a1a', borderRadius: '10px', padding: '12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 700, color: '#00d4ff' }}>{utilisateur?.cumul_points || 0}</div>
+                      <div style={{ fontSize: '11px', color: '#8888aa', marginTop: '4px' }}>Points</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: '110px', background: '#0a0a1a', borderRadius: '10px', padding: '12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 700, color: '#00e676' }}>{utilisateur?.cumul_heures_participation || 0}h</div>
+                      <div style={{ fontSize: '11px', color: '#8888aa', marginTop: '4px' }}>Heures</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: '110px', background: '#0a0a1a', borderRadius: '10px', padding: '12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '22px', fontWeight: 700, color: '#ffd700' }}>{utilisateur?.reliabilite_score ?? 100}%</div>
+                      <div style={{ fontSize: '11px', color: '#8888aa', marginTop: '4px' }}>Fiabilité</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </main>
 
+      {showMonEspace && (
+        <MonEspaceModal
+          utilisateur={utilisateur}
+          onClose={() => setShowMonEspace(false)}
+          onUpdate={(u) => setUtilisateur(u)}
+        />
+      )}
       {qrModal && <QRModal token={qrModal.token} titre={qrModal.titre} onClose={() => setQrModal(null)} />}
+      {participantsModal && <ParticipantsModal evenementId={participantsModal} onClose={() => setParticipantsModal(null)} />}
       {galerieOpen && <GalerieModal onClose={() => setGalerieOpen(false)} isAdmin={false} />}
 
       {/* ── Modale galerie d'un événement spécifique ── */}

@@ -14,6 +14,7 @@
   --dash-green         : #00e676;
   --dash-red           : #ff4d6d;
   --dash-gold          : #ffd700;
+  --dash-header-bg     : rgba(18, 18, 42, 0.95);
 }
 
 /* ============================================================
@@ -45,7 +46,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 1.5rem;
-  background: rgba(18, 18, 42, 0.95);
+  background: var(--dash-header-bg);
   border-bottom: 1px solid var(--dash-card-border);
   position: sticky;
   top: 0;

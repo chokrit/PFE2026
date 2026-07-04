@@ -27,6 +27,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 // ── Context global des langues ────────────────────────────────
 // DOIT envelopper TOUTE l'application — c'est la correction principale
 import { LanguageProvider } from './context/LanguageContext';
+import { ThemeProvider } from './context/ThemeContext';
 
 // ── Composant de protection des routes ───────────────────────
 import ProtectedRoute from './components/ProtectedRoute';
@@ -53,6 +54,7 @@ function App() {
     // ── CORRECTION CLÉ 1 : LanguageProvider DOIT être ici ──
     // Sans ce wrapper, useLanguage() crash dans tous les composants
     // et le changement de langue n'a aucun effet
+    <ThemeProvider>
     <LanguageProvider>
       <BrowserRouter>
         <Routes>
@@ -119,6 +121,7 @@ function App() {
         </Routes>
       </BrowserRouter>
     </LanguageProvider>
+    </ThemeProvider>
   );
 }
 

@@ -13,6 +13,7 @@ import '../../styles/dashboard/organisateur.css';
 import { fmtDate, fmtHeure, fmtDateHeure } from '../../utils/dates';
 import GalerieModal from '../../components/dashboard/GalerieModal';
 import ParticipantsModal from '../../components/dashboard/ParticipantsModal';
+import ThemeSelector from '../../components/dashboard/ThemeSelector';
 
 const mkDates = () => {
   const p = n => String(n).padStart(2, '0');
@@ -632,6 +633,7 @@ const DashboardOrganisateur = () => {
                     >
                         📸 Galerie
                     </button>
+                    <ThemeSelector />
                     <button className="dash-btn-logout" onClick={() => { localStorage.clear(); navigate('/login'); }}>
                         Déconnexion
                     </button>

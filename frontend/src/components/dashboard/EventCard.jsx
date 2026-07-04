@@ -28,6 +28,11 @@ const EventCard = ({ event, mode, onVoirQR, onSInscrire, onAnnuler, estInscrit, 
 
   const estComplet = event.nb_inscrits >= event.max_participants;
 
+  // Double sécurité : terminé si stat_event='terminé' OU si ev_end_time est déjà passé
+  const estExpire =
+    event.stat_event === 'terminé' ||
+    (event.ev_end_time && new Date(event.ev_end_time) < new Date());
+
   // ── Vérification du délai d'annulation (24h minimum avant début) ──
   const maintenant = new Date();
   const dateDebut  = new Date(event.ev_start_time || event.date);
@@ -107,14 +112,26 @@ const EventCard = ({ event, mode, onVoirQR, onSInscrire, onAnnuler, estInscrit, 
       <div className="event-card__actions">
         {mode === 'inscrit' && (
           <>
-            <button
-              className="dash-btn-primary event-card__btn"
-              onClick={onVoirQR}
-              disabled={event.stat_event === 'annulé'}
-            >
-              📱 Mon QR code
-            </button>
-            {!event.is_present && event.stat_event !== 'terminé' && event.stat_event !== 'annulé' && (
+            {estExpire ? (
+              <div style={{
+                display: 'block', padding: '8px 16px', borderRadius: '8px',
+                fontSize: '13px', fontWeight: 600, background: 'rgba(136,136,136,.1)',
+                color: '#555577', border: '1px solid #2a2a4a', cursor: 'default',
+                textAlign: 'center', width: '100%', fontFamily: 'Poppins,sans-serif',
+                boxSizing: 'border-box',
+              }}>
+                ■ Événement terminé
+              </div>
+            ) : (
+              <button
+                className="dash-btn-primary event-card__btn"
+                onClick={onVoirQR}
+                disabled={event.stat_event === 'annulé'}
+              >
+                📱 Mon QR code
+              </button>
+            )}
+            {!event.is_present && !estExpire && event.stat_event !== 'annulé' && (
               <button
                 onClick={annulationAutorisee ? onAnnuler : undefined}
                 disabled={!annulationAutorisee}
@@ -137,7 +154,7 @@ const EventCard = ({ event, mode, onVoirQR, onSInscrire, onAnnuler, estInscrit, 
         )}
 
         {mode === 'explorer' && (
-          (event.stat_event === 'terminé' || event.stat_event === 'annulé') ? (
+          (estExpire || event.stat_event === 'annulé') ? (
             <div
               style={{
                 display: 'block',

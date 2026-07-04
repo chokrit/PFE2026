@@ -21,6 +21,7 @@ import QRModal from '../../components/dashboard/QRModal';
 import GalerieModal from '../../components/dashboard/GalerieModal';
 import MonEspaceModal from '../../components/dashboard/MonEspaceModal';
 import ParticipantsModal from '../../components/dashboard/ParticipantsModal';
+import ThemeSelector from '../../components/dashboard/ThemeSelector';
 import '../../styles/dashboard/dashboard.css';
 
 const toDatetimeLocal = (d) => {
@@ -57,6 +58,12 @@ const DashboardUser = () => {
   // Formulaire création
   const [modalCreer, setModalCreer] = useState(false);
   const [savingEvent, setSavingEvent] = useState(false);
+
+  // Suggestion de lieu (formulaire inline dans création)
+  const [showSuggLieu, setShowSuggLieu]   = useState(false);
+  const [suggLieuNom, setSuggLieuNom]     = useState('');
+  const [suggLieuCap, setSuggLieuCap]     = useState('');
+  const [savingSuggLieu, setSavingSuggLieu] = useState(false);
 
   // ── Mon compte (modal) ───────────────────────────────────
   const [showMonEspace, setShowMonEspace] = useState(false);
@@ -162,6 +169,22 @@ const DashboardUser = () => {
     } catch (err) {
       flash('error', err.response?.data?.message || 'Erreur annulation');
     }
+  };
+
+  // ── Suggérer un lieu depuis le formulaire de création ────
+  const soumettreSuggLieu = async () => {
+    if (!suggLieuNom.trim()) { flash('error', 'Le nom du lieu est obligatoire'); return; }
+    setSavingSuggLieu(true);
+    try {
+      const res = await api.post('/locations/suggerer', {
+        name_location: suggLieuNom.trim(),
+        location_capacity: suggLieuCap ? Number(suggLieuCap) : 0,
+      });
+      flash('success', res.data.message);
+      setSuggLieuNom(''); setSuggLieuCap(''); setShowSuggLieu(false);
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur suggestion');
+    } finally { setSavingSuggLieu(false); }
   };
 
   // ── Soumettre un événement ────────────────────────────────
@@ -369,6 +392,31 @@ const DashboardUser = () => {
                     <option value="">— Sélectionner —</option>
                     {locations.map(l => <option key={l._id} value={l._id}>{l.name_location}</option>)}
                   </select>
+                  {!showSuggLieu ? (
+                    <button type="button" onClick={() => setShowSuggLieu(true)}
+                      style={{ marginTop: 5, fontSize: 11, color: '#8888aa', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'block' }}>
+                      + Mon lieu n'est pas dans la liste ? Suggérer
+                    </button>
+                  ) : (
+                    <div style={{ marginTop: 8, padding: '10px', background: 'rgba(0,212,255,.06)', border: '1px solid rgba(0,212,255,.2)', borderRadius: 8 }}>
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                        <input placeholder="Nom du lieu *" value={suggLieuNom} onChange={e => setSuggLieuNom(e.target.value)}
+                          style={{ flex: 2, minWidth: 120, background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                        <input placeholder="Capacité" type="number" min="0" value={suggLieuCap} onChange={e => setSuggLieuCap(e.target.value)}
+                          style={{ flex: 1, minWidth: 80, background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 6, padding: '6px 10px', fontFamily: 'Poppins,sans-serif', fontSize: 12 }} />
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button type="button" onClick={soumettreSuggLieu} disabled={savingSuggLieu}
+                          style={{ padding: '5px 12px', background: 'rgba(0,212,255,.2)', color: '#00d4ff', border: '1px solid rgba(0,212,255,.3)', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif', fontWeight: 600 }}>
+                          {savingSuggLieu ? '...' : '📍 Suggérer'}
+                        </button>
+                        <button type="button" onClick={() => { setShowSuggLieu(false); setSuggLieuNom(''); setSuggLieuCap(''); }}
+                          style={{ padding: '5px 10px', background: 'transparent', color: '#8888aa', border: '1px solid #2a2a4a', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                          Annuler
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="form-group">
@@ -424,6 +472,7 @@ const DashboardUser = () => {
           >
             👤 Mon compte
           </button>
+          <ThemeSelector />
           <button className="dash-btn-logout" onClick={handleLogout}>Déconnexion</button>
         </div>
       </header>

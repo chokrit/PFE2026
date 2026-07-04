@@ -3,20 +3,22 @@
 // Préfixe : /api/locations
 //
 // ROUTES :
-//   GET  /                  → liste des lieux actifs (connecté)
-//   POST /suggerer          → soumettre un nouveau lieu (connecté)
-//   GET  /suggestions       → voir les suggestions en attente (orga/admin)
-//   PUT  /:id/valider       → valider une suggestion (orga/admin)
-//   PUT  /:id/refuser       → refuser une suggestion (orga/admin)
-//   POST /                  → créer directement (orga/admin)
+//   GET    /                  → liste des lieux actifs (connecté)
+//   POST   /suggerer          → soumettre un nouveau lieu (connecté)
+//   GET    /suggestions       → voir les suggestions en attente (orga/admin)
+//   PUT    /:id/valider       → valider une suggestion (orga/admin)
+//   PUT    /:id/refuser       → refuser une suggestion (orga/admin)
+//   POST   /                  → créer directement (orga/admin)
+//   DELETE /:id               → supprimer définitivement (admin uniquement)
 // ============================================================
 
 const express      = require('express');
 const router       = express.Router();
-const { verifyToken, isOrganisateur } = require('../middleware/auth');
+const { verifyToken, isOrganisateur, isAdmin } = require('../middleware/auth');
 const Location     = require('../models/Location');
 const Notification = require('../models/Notification');
 const Utilisateur  = require('../models/Utilisateur');
+const Evenement    = require('../models/Evenement');
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/locations
@@ -190,6 +192,34 @@ router.post('/', verifyToken, isOrganisateur, async (req, res) => {
         });
         return res.status(201).json({ success: true, message: 'Lieu créé', location });
     } catch (err) {
+        return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// DELETE /api/locations/:id
+// Suppression définitive — admin uniquement.
+// Bloquée si un événement référence encore ce lieu.
+// ─────────────────────────────────────────────────────────────
+router.delete('/:id', verifyToken, isAdmin, async (req, res) => {
+    try {
+        const loc = await Location.findById(req.params.id);
+        if (!loc) {
+            return res.status(404).json({ success: false, message: 'Lieu introuvable' });
+        }
+
+        const nbEvenements = await Evenement.countDocuments({ location: req.params.id });
+        if (nbEvenements > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Ce lieu est utilisé par ${nbEvenements} événement(s) existant(s) et ne peut pas être supprimé.`,
+            });
+        }
+
+        await Location.findByIdAndDelete(req.params.id);
+        return res.json({ success: true, message: `Lieu "${loc.name_location}" supprimé.` });
+    } catch (err) {
+        console.error('❌ Erreur DELETE /locations/:id:', err.message);
         return res.status(500).json({ success: false, message: 'Erreur serveur' });
     }
 });

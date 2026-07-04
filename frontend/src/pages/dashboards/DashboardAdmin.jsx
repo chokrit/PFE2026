@@ -20,6 +20,7 @@ import ParticipantsModal from '../../components/dashboard/ParticipantsModal';
 import PhotoGallery    from '../../components/PhotoGallery';
 import NotificationBell from '../../components/dashboard/NotificationBell';
 import GalerieModal    from '../../components/dashboard/GalerieModal';
+import ThemeSelector   from '../../components/dashboard/ThemeSelector';
 import PeriodeSelector from '../../components/stats/PeriodeSelector';
 import { fmtDate }     from '../../utils/dates';
 import '../../styles/dashboard/dashboard.css';
@@ -151,6 +152,8 @@ const DashboardAdmin = () => {
   const [suggLieuNom, setSuggLieuNom]     = useState('');
   const [suggLieuCap, setSuggLieuCap]     = useState('');
   const [savingSuggLieu, setSavingSuggLieu] = useState(false);
+  const [locationsEnAttente, setLocationsEnAttente] = useState([]);
+  const [raisonRefusLieu, setRaisonRefusLieu] = useState('');
 
   // ── Modification / annulation événement (espace perso) ────
   const [modalModifier, setModalModifier]       = useState(null);
@@ -200,7 +203,7 @@ const DashboardAdmin = () => {
   const charger = async () => {
     setLoading(true);
     try {
-      const [usersR, evsR, locsR, catsR, inscR, dispoR, creaR, suggR, cxR] = await Promise.allSettled([
+      const [usersR, evsR, locsR, catsR, inscR, dispoR, creaR, suggR, cxR, locsAttenteR] = await Promise.allSettled([
         api.get('/utilisateurs'),
         api.get('/evenements/all'),
         api.get('/locations'),
@@ -210,6 +213,7 @@ const DashboardAdmin = () => {
         api.get('/evenements/mes-evenements'),
         api.get('/evenements/suggestions'),
         api.get('/connexions/mes-connexions'),
+        api.get('/locations/suggestions'),
       ]);
 
       if (usersR.status === 'fulfilled') {
@@ -229,6 +233,7 @@ const DashboardAdmin = () => {
       if (creaR.status === 'fulfilled') setMesCreations(creaR.value.data.evenements || []);
       if (suggR.status === 'fulfilled') setSuggestions(suggR.value.data.suggestions || []);
       if (cxR.status === 'fulfilled') setConnexions(cxR.value.data.connexions || {});
+      if (locsAttenteR.status === 'fulfilled') setLocationsEnAttente(locsAttenteR.value.data.suggestions || []);
 
       try {
         const rew = await api.get('/recompenses/mes-coupons');
@@ -395,6 +400,34 @@ const DashboardAdmin = () => {
       flash('success', res.data.message); setSuggLieuNom(''); setSuggLieuCap(''); setShowSuggLieu(false);
     } catch (err) { flash('error', err.response?.data?.message || 'Erreur suggestion'); }
     finally { setSavingSuggLieu(false); }
+  };
+
+  const validerLieuAdmin = async (id) => {
+    const lieu = locationsEnAttente.find(l => l._id === id);
+    try {
+      await api.put(`/locations/${id}/valider`);
+      flash('success', 'Lieu validé et maintenant disponible');
+      setLocationsEnAttente(p => p.filter(l => l._id !== id));
+      if (lieu) setLocations(prev => [...prev, { ...lieu, statut: 'active' }]);
+    } catch (err) { flash('error', err.response?.data?.message || 'Erreur validation'); }
+  };
+
+  const refuserLieuAdmin = async (id) => {
+    try {
+      await api.put(`/locations/${id}/refuser`, { raison: raisonRefusLieu.trim() });
+      flash('success', 'Suggestion refusée');
+      setLocationsEnAttente(p => p.filter(l => l._id !== id));
+      setRaisonRefusLieu('');
+    } catch (err) { flash('error', err.response?.data?.message || 'Erreur refus'); }
+  };
+
+  const supprimerLieu = async (id, nom) => {
+    if (!window.confirm(`Supprimer définitivement "${nom}" ?\n\nCette action est irréversible.`)) return;
+    try {
+      await api.delete(`/locations/${id}`);
+      setLocations(p => p.filter(l => l._id !== id));
+      flash('success', `Lieu "${nom}" supprimé`);
+    } catch (err) { flash('error', err.response?.data?.message || 'Erreur suppression'); }
   };
 
   const soumettreEvent = async (e) => {
@@ -608,6 +641,7 @@ const DashboardAdmin = () => {
             🏃 Espace utilisateur
           </button>
 
+          <ThemeSelector />
           <button className="dash-btn-logout" onClick={() => { localStorage.clear(); navigate('/login'); }}>
             Déconnexion
           </button>
@@ -634,6 +668,7 @@ const DashboardAdmin = () => {
             { key:'statistiques',  label:'Statistiques',  icon:'📈' },
             { key:'users',         label:'Utilisateurs',  icon:'👥' },
             { key:'events',        label:'Événements',    icon:'🏟' },
+            { key:'lieux',         label:'Lieux',         icon:'📍' },
             { key:'medias',        label:'Médias',        icon:'📷' },
           ].map(t => (
             <button key={t.key} className={`admin-nav-btn ${activeTab===t.key ? 'active' : ''}`} onClick={() => setActiveTab(t.key)}>
@@ -646,6 +681,7 @@ const DashboardAdmin = () => {
                   {aValider.length > 0 && <span style={{ background:'#ff4d6d', color:'#fff', borderRadius:'999px', fontSize:'10px', fontWeight:700, padding:'1px 6px' }}>{aValider.length} à valider</span>}
                 </>
               )}
+              {t.key==='lieux' && locationsEnAttente.length > 0 && <span className="dash-tab-badge" style={{ background:'#ff6b00' }}>{locationsEnAttente.length}</span>}
               {t.key==='medias' && mediasModeration.length > 0 && <span className="dash-tab-badge" style={{ background:'#ff4d6d' }}>{mediasModeration.length}</span>}
             </button>
           ))}
@@ -1076,6 +1112,31 @@ const DashboardAdmin = () => {
                         <option value="">— Sélectionner —</option>
                         {locations.map(l => <option key={l._id} value={l._id}>{l.name_location}</option>)}
                       </select>
+                      {!showSuggLieu ? (
+                        <button type="button" onClick={() => setShowSuggLieu(true)}
+                          style={{ marginTop:5, fontSize:11, color:'#8888aa', background:'none', border:'none', cursor:'pointer', padding:0, display:'block' }}>
+                          + Mon lieu n'est pas dans la liste ? Suggérer
+                        </button>
+                      ) : (
+                        <div style={{ marginTop:8, padding:'10px', background:'rgba(0,212,255,.06)', border:'1px solid rgba(0,212,255,.2)', borderRadius:8 }}>
+                          <div style={{ display:'flex', gap:6, marginBottom:6, flexWrap:'wrap' }}>
+                            <input placeholder="Nom du lieu *" value={suggLieuNom} onChange={e => setSuggLieuNom(e.target.value)}
+                              style={{ flex:2, minWidth:120, background:'#1a1a35', color:'#e8e8f0', border:'1px solid #2a2a4a', borderRadius:6, padding:'6px 10px', fontFamily:'Poppins,sans-serif', fontSize:12 }} />
+                            <input placeholder="Capacité" type="number" min="0" value={suggLieuCap} onChange={e => setSuggLieuCap(e.target.value)}
+                              style={{ flex:1, minWidth:80, background:'#1a1a35', color:'#e8e8f0', border:'1px solid #2a2a4a', borderRadius:6, padding:'6px 10px', fontFamily:'Poppins,sans-serif', fontSize:12 }} />
+                          </div>
+                          <div style={{ display:'flex', gap:6 }}>
+                            <button type="button" onClick={soumettreSuggLieu} disabled={savingSuggLieu}
+                              style={{ padding:'5px 12px', background:'rgba(0,212,255,.2)', color:'#00d4ff', border:'1px solid rgba(0,212,255,.3)', borderRadius:6, fontSize:12, cursor:'pointer', fontFamily:'Poppins,sans-serif', fontWeight:600 }}>
+                              {savingSuggLieu ? '...' : '📍 Suggérer'}
+                            </button>
+                            <button type="button" onClick={() => { setShowSuggLieu(false); setSuggLieuNom(''); setSuggLieuCap(''); }}
+                              style={{ padding:'5px 10px', background:'transparent', color:'#8888aa', border:'1px solid #2a2a4a', borderRadius:6, fontSize:12, cursor:'pointer', fontFamily:'Poppins,sans-serif' }}>
+                              Annuler
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="form-group">
                       <label>Catégorie</label>
@@ -1154,6 +1215,125 @@ const DashboardAdmin = () => {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ══ LIEUX ════════════════════════════════════════════ */}
+        {activeTab==='lieux' && (
+          <div>
+            <h2 className="dash-section-title">Gestion des lieux</h2>
+
+            {/* Zone 1 : En attente */}
+            <div style={{ marginBottom:'2rem' }}>
+              <h3 style={{ fontSize:15, fontWeight:700, color:'#ff6b00', marginBottom:14, display:'flex', alignItems:'center', gap:8 }}>
+                ⏳ Lieux en attente de validation
+                {locationsEnAttente.length > 0 && (
+                  <span style={{ background:'rgba(255,107,0,.2)', color:'#ff6b00', borderRadius:99, fontSize:11, padding:'2px 8px', fontWeight:700 }}>
+                    {locationsEnAttente.length}
+                  </span>
+                )}
+              </h3>
+
+              {locationsEnAttente.length === 0 ? (
+                <div className="dash-empty">
+                  <p className="dash-empty__icon">✅</p>
+                  <p className="dash-empty__text">Aucun lieu en attente de validation.</p>
+                </div>
+              ) : (
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))', gap:14 }}>
+                  {locationsEnAttente.map(loc => (
+                    <div key={loc._id} style={{ background:'var(--dash-card-bg,#12122a)', border:'1px solid rgba(255,107,0,.25)', borderRadius:12, padding:'14px 16px' }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
+                        <div>
+                          <div style={{ fontWeight:700, color:'#e8e8f0', fontSize:14 }}>📍 {loc.name_location}</div>
+                          {loc.location_capacity > 0 && (
+                            <div style={{ fontSize:12, color:'#8888aa', marginTop:3 }}>
+                              Capacité : {loc.location_capacity} pers.
+                            </div>
+                          )}
+                          {loc.suggere_par && (
+                            <div style={{ fontSize:11, color:'#8888aa', marginTop:2 }}>
+                              Proposé par : {loc.suggere_par.first_name} {loc.suggere_par.last_name}
+                            </div>
+                          )}
+                          {loc.raison_suggestion && (
+                            <div style={{ fontSize:11, color:'#8888aa', marginTop:2, fontStyle:'italic' }}>
+                              « {loc.raison_suggestion} »
+                            </div>
+                          )}
+                        </div>
+                        <span style={{ fontSize:10, color:'#ff6b00', background:'rgba(255,107,0,.12)', padding:'2px 8px', borderRadius:99, fontWeight:700, whiteSpace:'nowrap', marginLeft:8 }}>
+                          En attente
+                        </span>
+                      </div>
+                      <div style={{ display:'flex', gap:8 }}>
+                        <button
+                          onClick={() => validerLieuAdmin(loc._id)}
+                          style={{ flex:1, padding:'7px', background:'rgba(0,230,118,.15)', color:'#00e676', border:'1px solid rgba(0,230,118,.3)', borderRadius:7, cursor:'pointer', fontSize:12, fontFamily:'Poppins,sans-serif', fontWeight:600 }}
+                        >
+                          ✓ Confirmer
+                        </button>
+                        <button
+                          onClick={() => refuserLieuAdmin(loc._id)}
+                          style={{ flex:1, padding:'7px', background:'rgba(255,77,109,.15)', color:'#ff4d6d', border:'1px solid rgba(255,77,109,.3)', borderRadius:7, cursor:'pointer', fontSize:12, fontFamily:'Poppins,sans-serif', fontWeight:600 }}
+                        >
+                          ✕ Refuser
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <hr style={{ border:'none', borderTop:'1px solid #2a2a4a', margin:'0 0 2rem' }} />
+
+            {/* Zone 2 : Lieux confirmés */}
+            <div>
+              <h3 style={{ fontSize:15, fontWeight:700, color:'#00d4ff', marginBottom:14, display:'flex', alignItems:'center', gap:8 }}>
+                ✓ Lieux confirmés
+                <span style={{ background:'rgba(0,212,255,.12)', color:'#00d4ff', borderRadius:99, fontSize:11, padding:'2px 8px', fontWeight:700 }}>
+                  {locations.length}
+                </span>
+              </h3>
+
+              {locations.length === 0 ? (
+                <div className="dash-empty">
+                  <p className="dash-empty__icon">📍</p>
+                  <p className="dash-empty__text">Aucun lieu actif pour le moment.</p>
+                </div>
+              ) : (
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:14 }}>
+                  {locations.map(loc => (
+                    <div key={loc._id} style={{ background:'var(--dash-card-bg,#12122a)', border:'1px solid var(--dash-card-border,#2a2a4a)', borderRadius:12, padding:'14px 16px', display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12 }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontWeight:700, color:'#e8e8f0', fontSize:14, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                          📍 {loc.name_location}
+                        </div>
+                        {loc.location_capacity > 0 && (
+                          <div style={{ fontSize:12, color:'#8888aa', marginTop:3 }}>
+                            Capacité : {loc.location_capacity} pers.
+                          </div>
+                        )}
+                        <div style={{ marginTop:6 }}>
+                          {loc.is_official
+                            ? <span style={{ fontSize:10, background:'rgba(0,212,255,.15)', color:'#00d4ff', padding:'2px 7px', borderRadius:99, fontWeight:700 }}>Officiel</span>
+                            : <span style={{ fontSize:10, background:'rgba(136,136,136,.1)', color:'#8888aa', padding:'2px 7px', borderRadius:99, fontWeight:600 }}>Proposé</span>
+                          }
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => supprimerLieu(loc._id, loc.name_location)}
+                        title="Supprimer définitivement ce lieu"
+                        style={{ padding:'6px 10px', background:'rgba(255,77,109,.12)', color:'#ff4d6d', border:'1px solid rgba(255,77,109,.25)', borderRadius:7, cursor:'pointer', fontSize:13, flexShrink:0 }}
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

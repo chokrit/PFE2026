@@ -38,6 +38,7 @@ const DashboardUser = () => {
   const [evenementsDispos, setEvenementsDispos] = useState([]);
   const [mesCreations, setMesCreations] = useState([]);
   const [mesRecompenses, setMesRecompenses] = useState([]);
+  const [connexions, setConnexions]         = useState({ demandes_recues:[], partenaires:[], likes_donnes:[], likes_recus:[] });
   const [suggestions, setSuggestions]       = useState([]);
   const [locations, setLocations] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -107,13 +108,14 @@ const DashboardUser = () => {
   const charger = async () => {
     setLoading(true);
     try {
-      const [insc, evs, crea, sugg, locs, cats] = await Promise.allSettled([
+      const [insc, evs, crea, sugg, locs, cats, cxR] = await Promise.allSettled([
         api.get('/participations/mes-inscriptions'),
         api.get('/evenements'),
         api.get('/evenements/mes-evenements'),
         api.get('/evenements/suggestions'),          // module IA — suggestions personnalisées
         api.get('/locations'),
         api.get('/categories'),
+        api.get('/connexions/mes-connexions'),
       ]);
       if (insc.status === 'fulfilled') setMesInscriptions(insc.value.data.participations || []);
       if (evs.status === 'fulfilled') setEvenementsDispos(evs.value.data.evenements || []);
@@ -121,6 +123,7 @@ const DashboardUser = () => {
       if (sugg.status === 'fulfilled') setSuggestions(sugg.value.data.suggestions || []);
       if (locs.status === 'fulfilled') setLocations(locs.value.data.locations || []);
       if (cats.status === 'fulfilled') setCategories(cats.value.data.categories || []);
+      if (cxR.status === 'fulfilled') setConnexions(cxR.value.data.connexions || {});
       try {
         const rew = await api.get('/recompenses/mes-coupons');
         setMesRecompenses(rew.data.coupons || []);
@@ -234,6 +237,14 @@ const DashboardUser = () => {
   const flash = (type, message) => {
     setNotif({ type, message });
     setTimeout(() => setNotif(null), 4000);
+  };
+
+  const repondrePartenaire = async (connexionId, statut) => {
+    try {
+      await api.put(`/connexions/partenaire/${connexionId}`, { statut });
+      flash('success', statut === 'accepte' ? 'Partenariat accepté !' : 'Demande refusée');
+      charger();
+    } catch { flash('error', 'Erreur'); }
   };
 
   // ── Galerie par événement ─────────────────────────────────
@@ -518,8 +529,9 @@ const DashboardUser = () => {
         {/* Onglets */}
         <div className="dash-tabs">
           {[
-            { key: 'inscrits', label: 'Mes inscriptions', count: mesInscriptions.length, color: '' },
-            { key: 'explorer', label: 'Explorer', count: evenementsDispos.length, color: '' },
+            { key: 'inscrits',   label: 'Mes inscriptions', count: mesInscriptions.length,                     color: '' },
+            { key: 'connexions', label: 'Connexions',        count: connexions.demandes_recues?.length||0, color: '#ec4899' },
+            { key: 'explorer',   label: 'Explorer',          count: evenementsDispos.length,                    color: '' },
             { key: 'creations', label: 'Mes créations', count: mesCreations.length, color: '#9c27b0' },
             { key: 'recompenses', label: 'Récompenses', count: mesRecompenses.filter(r => !r.is_redeemed).length, color: '#ff6b00' },
             { key: 'profil',      label: 'Mon profil',  count: 0, color: '' },
@@ -736,6 +748,55 @@ const DashboardUser = () => {
                 {mesRecompenses.map(r => <RewardCard key={r.id} recompense={r} />)}
               </div>
             )
+          )}
+
+          {/* ── Connexions ── */}
+          {activeTab === 'connexions' && (
+            <div>
+              <h2 className="dash-section-title">Mes connexions</h2>
+              <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+                {(connexions.demandes_recues?.length||0) > 0 && (
+                  <div>
+                    <h3 style={{ fontSize:14, fontWeight:600, color:'#ec4899', marginBottom:10 }}>🤝 Demandes reçues ({connexions.demandes_recues.length})</h3>
+                    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                      {connexions.demandes_recues.map(cx => (
+                        <div key={cx._id} style={{ background:'#12122a', border:'1px solid #2a2a4a', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12 }}>
+                          <div style={{ flex:1 }}>
+                            <span style={{ color:'#e8e8f0', fontWeight:600 }}>{cx.demandeur?.first_name} {cx.demandeur?.last_name}</span>
+                            <span style={{ color:'#666', fontSize:12, marginLeft:8 }}>via {cx.evenement?.title_event}</span>
+                          </div>
+                          <button onClick={() => repondrePartenaire(cx._id,'accepte')} style={{ background:'#10b98122', color:'#10b981', border:'1px solid #10b981', borderRadius:6, padding:'5px 12px', cursor:'pointer', fontSize:12 }}>Accepter</button>
+                          <button onClick={() => repondrePartenaire(cx._id,'refuse')}  style={{ background:'#ef444422', color:'#ef4444', border:'1px solid #ef4444', borderRadius:6, padding:'5px 12px', cursor:'pointer', fontSize:12 }}>Refuser</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <h3 style={{ fontSize:14, fontWeight:600, color:'#10b981', marginBottom:10 }}>✅ Partenaires ({connexions.partenaires?.length||0})</h3>
+                  {(connexions.partenaires?.length||0)===0
+                    ? <p style={{ color:'#555', fontSize:13 }}>Aucun partenaire pour l'instant.</p>
+                    : <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                        {connexions.partenaires.map(cx => {
+                          const autre = cx.demandeur?.first_name ? cx.demandeur : cx.receveur;
+                          return <div key={cx._id} style={{ background:'#12122a', border:'1px solid #2a2a4a', borderRadius:10, padding:'8px 14px', fontSize:13, color:'#e8e8f0' }}>🤝 {autre?.first_name} {autre?.last_name}</div>;
+                        })}
+                      </div>
+                  }
+                </div>
+                <div>
+                  <h3 style={{ fontSize:14, fontWeight:600, color:'#ef4444', marginBottom:10 }}>❤️ Likes donnés ({connexions.likes_donnes?.length||0})</h3>
+                  {(connexions.likes_donnes?.length||0)===0
+                    ? <p style={{ color:'#555', fontSize:13 }}>Vous n'avez encore liké personne.</p>
+                    : <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                        {connexions.likes_donnes.map(cx => (
+                          <div key={cx._id} style={{ background:'#12122a', border:'1px solid #2a2a4a', borderRadius:10, padding:'8px 14px', fontSize:13, color:'#e8e8f0' }}>❤️ {cx.receveur?.first_name} {cx.receveur?.last_name}</div>
+                        ))}
+                      </div>
+                  }
+                </div>
+              </div>
+            </div>
           )}
 
           {/* ── Mon profil ── */}

@@ -38,6 +38,13 @@ const regleRecompenseSchema = new mongoose.Schema({
         // Pourcentage de remise accordé : ex 15 → coupon de -15%
     },
 
+    duree_validite: {
+        type: Number,
+        default: 30,
+        min: 1
+        // Durée de validité du coupon généré, en jours
+    },
+
     est_active: {
         type: Boolean,
         default: true

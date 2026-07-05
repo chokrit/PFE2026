@@ -20,7 +20,8 @@ import ParticipantsModal from '../../components/dashboard/ParticipantsModal';
 import PhotoGallery    from '../../components/PhotoGallery';
 import NotificationBell from '../../components/dashboard/NotificationBell';
 import GalerieModal    from '../../components/dashboard/GalerieModal';
-import ThemeSelector   from '../../components/dashboard/ThemeSelector';
+import ThemeSelector      from '../../components/dashboard/ThemeSelector';
+import RecompensesModal  from '../../components/RecompensesModal';
 import PeriodeSelector from '../../components/stats/PeriodeSelector';
 import { fmtDate }     from '../../utils/dates';
 import '../../styles/dashboard/dashboard.css';
@@ -112,6 +113,7 @@ const DashboardAdmin = () => {
   // ── Médias (modération) ───────────────────────────────────
   const [mediasModeration, setMediasModeration] = useState([]);
   const [mediasLoading, setMediasLoading]       = useState(false);
+  const [showRecompensesModal, setShowRecompensesModal] = useState(false);
 
   // ── Statistiques ──────────────────────────────────────────
   const [statsData, setStatsData]           = useState(null);
@@ -650,6 +652,7 @@ const DashboardAdmin = () => {
 
       {/* Modaux globaux */}
       {galerieOpen && <GalerieModal onClose={() => setGalerieOpen(false)} isAdmin={true} />}
+      {showRecompensesModal && <RecompensesModal onClose={() => setShowRecompensesModal(false)} />}
       {showMonEspace && (
         <MonEspaceModal
           utilisateur={adminUser}
@@ -759,7 +762,16 @@ const DashboardAdmin = () => {
         {/* ══ STATISTIQUES ═════════════════════════════════════ */}
         {activeTab==='statistiques' && (
           <div>
-            <h2 className="dash-section-title">Statistiques</h2>
+            <div className="admin-section-header">
+              <h2 className="dash-section-title">Statistiques</h2>
+              <button
+                className="dash-btn-primary"
+                onClick={() => setShowRecompensesModal(true)}
+                style={{ display:'flex', alignItems:'center', gap:6 }}
+              >
+                🏆 Gestion des récompenses
+              </button>
+            </div>
 
             <PeriodeSelector
               periodeActive={statsPeriode}

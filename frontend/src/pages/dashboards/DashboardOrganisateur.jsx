@@ -63,6 +63,7 @@ const DashboardOrganisateur = () => {
     const [mesInscriptions, setMesInscriptions] = useState([]);
     const [evenementsDispos, setEvenementsDispos] = useState([]);
     const [mesRecompenses, setMesRecompenses]     = useState([]);
+    const [connexions, setConnexions]             = useState({ demandes_recues:[], partenaires:[], likes_donnes:[], likes_recus:[] });
     const [suggestions, setSuggestions]           = useState([]);
     const [qrModal, setQrModal]                   = useState(null);
     const [participantsModal, setParticipantsModal] = useState(null);
@@ -128,7 +129,7 @@ const DashboardOrganisateur = () => {
     const chargerMesEvents = async () => {
         setLoading(true);
         try {
-            const [evsR, inscR, dispoR, suggR, suggCatsR, catsR, locsR, suggLieuxR] = await Promise.allSettled([
+            const [evsR, inscR, dispoR, suggR, suggCatsR, catsR, locsR, suggLieuxR, cxR] = await Promise.allSettled([
                 api.get('/evenements/mes-evenements'),
                 api.get('/participations/mes-inscriptions'),
                 api.get('/evenements'),
@@ -137,6 +138,7 @@ const DashboardOrganisateur = () => {
                 api.get('/categories'),
                 api.get('/locations'),
                 api.get('/locations/suggestions'),
+                api.get('/connexions/mes-connexions'),
             ]);
             if (evsR.status === 'fulfilled')        setMesEvents(evsR.value.data.evenements || []);
             if (inscR.status === 'fulfilled')       setMesInscriptions(inscR.value.data.participations || []);
@@ -146,6 +148,7 @@ const DashboardOrganisateur = () => {
             if (catsR.status === 'fulfilled')       setCategoriesActives(catsR.value.data.categories || []);
             if (locsR.status === 'fulfilled')       setLocations(locsR.value.data.locations || []);
             if (suggLieuxR.status === 'fulfilled')  setSuggestionLieux(suggLieuxR.value.data.suggestions || []);
+            if (cxR.status === 'fulfilled')         setConnexions(cxR.value.data.connexions || {});
             try {
                 const rew = await api.get('/recompenses/mes-coupons');
                 setMesRecompenses(rew.data.coupons || []);
@@ -169,6 +172,14 @@ const DashboardOrganisateur = () => {
     const notif = (type, msg) => {
         setNotification({ type, msg });
         setTimeout(() => setNotification(null), 3000);
+    };
+
+    const repondrePartenaire = async (connexionId, statut) => {
+        try {
+            await api.put(`/connexions/partenaire/${connexionId}`, { statut });
+            notif('success', statut === 'accepte' ? 'Partenariat accepté !' : 'Demande refusée');
+            chargerMesEvents();
+        } catch { notif('error', 'Erreur'); }
     };
 
     // ── Équipes IA — génération ───────────────────────────────
@@ -659,8 +670,9 @@ const DashboardOrganisateur = () => {
                         { key: 'equipes',          label: '👥 Équipes IA' },
                         { key: 'categories',       label: `🏷 ${t('categories')}`, badge: suggestionsCats.length + suggestionLieux.length },
                         { key: 'explorer',         label: `🔍 ${t('explore')}` },
-                        { key: 'mes-inscriptions', label: t('myRegistrations'), badge: mesInscriptions.length },
-                        { key: 'recompenses',      label: `🎫 ${t('rewards')}`,  badge: mesRecompenses.filter(r => !r.is_redeemed).length },
+                        { key: 'mes-inscriptions', label: t('myRegistrations'),  badge: mesInscriptions.length },
+                        { key: 'connexions',        label: '🤝 Connexions',        badge: connexions.demandes_recues?.length||0 },
+                        { key: 'recompenses',       label: `🎫 ${t('rewards')}`,   badge: mesRecompenses.filter(r => !r.is_redeemed).length },
                         { key: 'profil',           label: t('myProfile') },
                     ].map(tab => (
                         <button
@@ -1768,6 +1780,55 @@ const DashboardOrganisateur = () => {
                             ))}
                         </div>
                     )
+                )}
+
+                {/* ── CONNEXIONS ── */}
+                {activeTab === 'connexions' && (
+                    <div>
+                        <h2 className="dash-section-title">Mes connexions</h2>
+                        <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+                            {(connexions.demandes_recues?.length||0) > 0 && (
+                                <div>
+                                    <h3 style={{ fontSize:14, fontWeight:600, color:'#ec4899', marginBottom:10 }}>🤝 Demandes reçues ({connexions.demandes_recues.length})</h3>
+                                    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                                        {connexions.demandes_recues.map(cx => (
+                                            <div key={cx._id} style={{ background:'#12122a', border:'1px solid #2a2a4a', borderRadius:10, padding:'10px 14px', display:'flex', alignItems:'center', gap:12 }}>
+                                                <div style={{ flex:1 }}>
+                                                    <span style={{ color:'#e8e8f0', fontWeight:600 }}>{cx.demandeur?.first_name} {cx.demandeur?.last_name}</span>
+                                                    <span style={{ color:'#666', fontSize:12, marginLeft:8 }}>via {cx.evenement?.title_event}</span>
+                                                </div>
+                                                <button onClick={() => repondrePartenaire(cx._id,'accepte')} style={{ background:'#10b98122', color:'#10b981', border:'1px solid #10b981', borderRadius:6, padding:'5px 12px', cursor:'pointer', fontSize:12 }}>Accepter</button>
+                                                <button onClick={() => repondrePartenaire(cx._id,'refuse')}  style={{ background:'#ef444422', color:'#ef4444', border:'1px solid #ef4444', borderRadius:6, padding:'5px 12px', cursor:'pointer', fontSize:12 }}>Refuser</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            <div>
+                                <h3 style={{ fontSize:14, fontWeight:600, color:'#10b981', marginBottom:10 }}>✅ Partenaires ({connexions.partenaires?.length||0})</h3>
+                                {(connexions.partenaires?.length||0)===0
+                                    ? <p style={{ color:'#555', fontSize:13 }}>Aucun partenaire pour l'instant.</p>
+                                    : <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                                        {connexions.partenaires.map(cx => {
+                                            const autre = cx.demandeur?.first_name ? cx.demandeur : cx.receveur;
+                                            return <div key={cx._id} style={{ background:'#12122a', border:'1px solid #2a2a4a', borderRadius:10, padding:'8px 14px', fontSize:13, color:'#e8e8f0' }}>🤝 {autre?.first_name} {autre?.last_name}</div>;
+                                        })}
+                                      </div>
+                                }
+                            </div>
+                            <div>
+                                <h3 style={{ fontSize:14, fontWeight:600, color:'#ef4444', marginBottom:10 }}>❤️ Likes donnés ({connexions.likes_donnes?.length||0})</h3>
+                                {(connexions.likes_donnes?.length||0)===0
+                                    ? <p style={{ color:'#555', fontSize:13 }}>Vous n'avez encore liké personne.</p>
+                                    : <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                                        {connexions.likes_donnes.map(cx => (
+                                            <div key={cx._id} style={{ background:'#12122a', border:'1px solid #2a2a4a', borderRadius:10, padding:'8px 14px', fontSize:13, color:'#e8e8f0' }}>❤️ {cx.receveur?.first_name} {cx.receveur?.last_name}</div>
+                                        ))}
+                                      </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
                 )}
 
                 {/* ── RÉCOMPENSES ── */}

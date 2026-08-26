@@ -12,6 +12,7 @@ const Participation = require('../models/Participation');
 const Utilisateur   = require('../models/Utilisateur');
 const Evenement     = require('../models/Evenement');
 const Notification  = require('../models/Notification');
+const Interest      = require('../models/Interest');
 
 // Service IA de formation d'équipes
 // Algorithme glouton avec score d'affinité (partenariat, likes, collaboration, niveau)
@@ -241,7 +242,7 @@ router.delete('/:equipeId/membre/:userId', verifyToken, isOrganisateur, async (r
 // Query param :
 //   tailleEquipe — nombre de membres par équipe (défaut 4, min 2)
 // ─────────────────────────────────────────────────────────────
-router.get('/suggestions/:eventId', verifyToken, isOrganisateur, async (req, res) => {
+router.get('/suggestions/:eventId', verifyToken, async (req, res) => {
     try {
         const tailleEquipe = parseInt(req.query.tailleEquipe) || 4;
 
@@ -250,6 +251,13 @@ router.get('/suggestions/:eventId', verifyToken, isOrganisateur, async (req, res
                 success: false,
                 message: 'La taille d\'équipe doit être d\'au moins 2 membres',
             });
+        }
+
+        // Contrôle d'accès : admin → tout événement ; orga/user → seulement les leurs
+        const evAcces = await Evenement.findById(req.params.eventId).select('createur');
+        if (!evAcces) return res.status(404).json({ success: false, message: 'Événement introuvable' });
+        if (req.utilisateur.role !== 'admin' && evAcces.createur.toString() !== req.utilisateur._id.toString()) {
+            return res.status(403).json({ success: false, message: 'Accès refusé — vous n\'êtes pas le créateur de cet événement' });
         }
 
         const resultat = await genererEquipesSuggeres(req.params.eventId, tailleEquipe);
@@ -281,7 +289,7 @@ router.get('/suggestions/:eventId', verifyToken, isOrganisateur, async (req, res
 // ─────────────────────────────────────────────────────────────
 const COULEURS_EQUIPES = ['rouge', 'bleu', 'vert', 'jaune', 'orange', 'violet'];
 
-router.post('/valider-lot', verifyToken, isOrganisateur, async (req, res) => {
+router.post('/valider-lot', verifyToken, async (req, res) => {
     try {
         const { equipes, evenement_id } = req.body;
 
@@ -292,10 +300,14 @@ router.post('/valider-lot', verifyToken, isOrganisateur, async (req, res) => {
             return res.status(400).json({ success: false, message: 'evenement_id est requis' });
         }
 
-        // Récupérer le titre de l'événement pour personnaliser les notifications
-        const ev = await Evenement.findById(evenement_id).select('title_event');
+        // Récupérer l'événement + contrôle d'accès
+        const ev = await Evenement.findById(evenement_id).select('title_event categories createur');
         if (!ev) {
             return res.status(404).json({ success: false, message: 'Événement introuvable' });
+        }
+        // Admin → tout événement ; orga/user → seulement les leurs
+        if (req.utilisateur.role !== 'admin' && ev.createur.toString() !== req.utilisateur._id.toString()) {
+            return res.status(403).json({ success: false, message: 'Accès refusé — vous n\'êtes pas le créateur de cet événement' });
         }
 
         const equipesCreees = [];
@@ -326,6 +338,56 @@ router.post('/valider-lot', verifyToken, isOrganisateur, async (req, res) => {
                     titre:       `Équipe assignée — ${ev.title_event}`,
                     message:     `Vous avez été assigné à l'équipe "${nomEquipe}" pour l'événement "${ev.title_event}". Bonne chance !`,
                 });
+            }
+
+            // EMAIL STUB — nodemailer non configuré.
+            // Remplacer ce log par un appel sendMail() une fois le SMTP configuré dans .env.
+            if (membres.length > 0) {
+                console.log(`[EMAIL STUB] Équipe "${nomEquipe}" (event: "${ev.title_event}") — notification email à envoyer à ${membres.length} membre(s)`);
+            }
+        }
+
+        // ── Notification aux utilisateurs pertinents non encore inscrits ──
+        // Réutilise la source de données de iaSuggestionService (Interest.categorie)
+        // pour identifier les utilisateurs ayant un historique dans les catégories
+        // de l'événement. Exclut les inscrits, admins et organisateurs.
+        // Cap à 15 destinataires pour éviter le spam.
+        if (ev.categories?.length > 0) {
+            const inscrits = await Participation.find({ evenement: evenement_id }).select('utilisateur');
+            const idInscrits = new Set(inscrits.map(p => p.utilisateur.toString()));
+
+            const interests = await Interest.find({
+                categorie:         { $in: ev.categories },
+                nb_participations: { $gte: 1 },
+            })
+                .populate('utilisateur', '_id role')
+                .sort({ nb_participations: -1 })
+                .limit(60);
+
+            const vus = new Set();
+            const candidats = [];
+            for (const int of interests) {
+                const u = int.utilisateur;
+                if (!u?._id) continue;
+                const uid = u._id.toString();
+                if (vus.has(uid)) continue;
+                if (idInscrits.has(uid)) continue;
+                if (['admin', 'organisateur'].includes(u.role)) continue;
+                vus.add(uid);
+                candidats.push(uid);
+                if (candidats.length >= 15) break;
+            }
+
+            if (candidats.length > 0) {
+                const notifsNonInscrits = candidats.map(uid => ({
+                    utilisateur: uid,
+                    evenement:   evenement_id,
+                    type:        'systeme',
+                    titre:       `Des équipes ont été formées — ${ev.title_event}`,
+                    message:     `Des équipes viennent d'être constituées pour l'événement "${ev.title_event}". Rejoignez-le avant qu'il ne soit complet !`,
+                }));
+                await Notification.insertMany(notifsNonInscrits, { ordered: false }).catch(() => {});
+                console.log(`📨 ${candidats.length} utilisateurs non inscrits notifiés — event ${evenement_id}`);
             }
         }
 

@@ -167,6 +167,41 @@ const creerEvenement = async (req, res) => {
       return res.status(409).json({ success: false, message: conflit.message });
     }
 
+    // ── Vérification de conflit de lieu ──
+    if (location) {
+      const fmtDate = (d) =>
+        new Date(d).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+
+      const conflitLieu = await Evenement.findOne({
+        location:      location,
+        stat_event:    { $in: ['brouillon', 'publié'] },
+        ev_start_time: { $lt: ev_end_time ? new Date(ev_end_time) : new Date(new Date(ev_start_time).getTime() + 2 * 60 * 60 * 1000) },
+        ev_end_time:   { $gt: new Date(ev_start_time) },
+      }).populate('createur', 'first_name last_name')
+        .populate('location', 'name_location');
+
+      if (conflitLieu) {
+        await Notification.create({
+          utilisateur: req.utilisateur._id,
+          evenement:   null,
+          type:        'systeme',
+          titre:       'Conflit de lieu détecté',
+          message:     `Votre événement "${title_event}" n'a pas pu être créé car le lieu "${conflitLieu.location?.name_location || 'sélectionné'}" est déjà réservé du ${fmtDate(conflitLieu.ev_start_time)} au ${fmtDate(conflitLieu.ev_end_time)} par l'événement "${conflitLieu.title_event}". Veuillez choisir un autre lieu ou une autre plage horaire.`,
+        });
+
+        return res.status(409).json({
+          success: false,
+          message: `Un événement existe déjà dans ce lieu sur cette plage horaire : "${conflitLieu.title_event}" du ${fmtDate(conflitLieu.ev_start_time)} au ${fmtDate(conflitLieu.ev_end_time)}`,
+          conflit: {
+            titre:    conflitLieu.title_event,
+            debut:    conflitLieu.ev_start_time,
+            fin:      conflitLieu.ev_end_time,
+            createur: conflitLieu.createur?.first_name,
+          },
+        });
+      }
+    }
+
     // ── RÈGLE CLÉ : statut selon le rôle ──
     // user         → toujours 'brouillon', l'admin publiera après validation
     // admin/orga   → respecte le choix du formulaire
@@ -183,7 +218,9 @@ const creerEvenement = async (req, res) => {
       max_participants: Number(max_participants) || 30,
       stat_event: statutFinal,
       createur: req.utilisateur._id,
-      qr_code_token: null,
+      // qr_code_token volontairement absent : le champ doit être MANQUANT (pas null)
+      // pour que le sparse unique index l'ignore et permette plusieurs brouillons.
+      // Il est défini ci-dessous seulement pour les événements publiés.
     };
 
     if (location && location !== '') data.location = location;
@@ -207,6 +244,9 @@ const creerEvenement = async (req, res) => {
     console.error('creerEvenement:', error);
     if (error.name === 'ValidationError') {
       return res.status(400).json({ success: false, message: Object.values(error.errors).map(e => e.message).join(', ') });
+    }
+    if (error.code === 11000) {
+      return res.status(409).json({ success: false, message: 'Un événement avec ces données existe déjà (contrainte d\'unicité).' });
     }
     return res.status(500).json({ success: false, message: 'Erreur serveur' });
   }

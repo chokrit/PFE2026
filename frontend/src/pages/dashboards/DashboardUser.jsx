@@ -73,6 +73,17 @@ const DashboardUser = () => {
   const [profilForm, setProfilForm] = useState({ first_name: '', last_name: '', telephone: '', langue: 'fr' });
   const [savingProfil, setSavingProfil] = useState(false);
 
+  // ── Équipes IA ────────────────────────────────────────────
+  const [equipeEventId, setEquipeEventId]     = useState('');
+  const [tailleEquipe, setTailleEquipe]       = useState(4);
+  const [equipesSuggeres, setEquipesSuggeres] = useState([]);
+  const [loadingEquipes, setLoadingEquipes]   = useState(false);
+  const [savingEquipes, setSavingEquipes]     = useState(false);
+
+  // ── Notation événement ───────────────────────────────────
+  const [notingEvent, setNotingEvent] = useState(null);
+  const [noteValue, setNoteValue]     = useState(0);
+
   const [form, setForm] = useState({
     title_event: '', event_description: '', ev_start_time: '',
     ev_end_time: '', max_participants: 10, location: '', categories: [],
@@ -247,6 +258,60 @@ const DashboardUser = () => {
     } catch { flash('error', 'Erreur'); }
   };
 
+  // ── Équipes IA ─────────────────────────────────────────────
+  const genererEquipes = async () => {
+    if (!equipeEventId) return;
+    setLoadingEquipes(true);
+    setEquipesSuggeres([]);
+    try {
+      const res = await api.get(`/equipes/suggestions/${equipeEventId}?tailleEquipe=${tailleEquipe}`);
+      const eq = res.data.equipes_suggerees || [];
+      if (eq.length === 0) {
+        flash('error', 'Pas assez de participants pour former des équipes');
+      } else {
+        setEquipesSuggeres(eq);
+      }
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur génération équipes');
+    } finally { setLoadingEquipes(false); }
+  };
+
+  const retirerMembreEquipe = (eqIdx, membreId) => {
+    setEquipesSuggeres(prev => {
+      const equipes = prev.map(eq => ({ ...eq, membres: [...eq.membres] }));
+      const membre  = equipes[eqIdx].membres.find(m => String(m._id) === String(membreId));
+      equipes[eqIdx].membres = equipes[eqIdx].membres.filter(m => String(m._id) !== String(membreId));
+      if (membre && equipes.length > 1) {
+        const cibleIdx = equipes.reduce((best, eq, i) => {
+          if (i === eqIdx) return best;
+          return eq.membres.length < equipes[best === eqIdx ? (eqIdx === 0 ? 1 : 0) : best].membres.length ? i : best;
+        }, eqIdx === 0 ? 1 : 0);
+        equipes[cibleIdx].membres.push(membre);
+      }
+      return equipes;
+    });
+  };
+
+  const validerEtNotifier = async () => {
+    if (!equipesSuggeres.length || !equipeEventId) return;
+    setSavingEquipes(true);
+    try {
+      await api.post('/equipes/valider-lot', {
+        evenement_id: equipeEventId,
+        equipes: equipesSuggeres.map(eq => ({
+          nom:         eq.nom,
+          membres:     eq.membres.map(m => m._id),
+          score_moyen: eq.score_moyen,
+        })),
+      });
+      flash('success', `${equipesSuggeres.length} équipes validées — membres notifiés !`);
+      setEquipesSuggeres([]);
+      setEquipeEventId('');
+    } catch (err) {
+      flash('error', err.response?.data?.message || 'Erreur sauvegarde équipes');
+    } finally { setSavingEquipes(false); }
+  };
+
   // ── Galerie par événement ─────────────────────────────────
 
   // Ouvre la modale et charge les photos de l'événement
@@ -292,6 +357,14 @@ const DashboardUser = () => {
     setGalerieEvent(null);
     setPhotosEvent([]);
     setLightboxIdx(null);
+  };
+
+  const soumettreNote = async () => {
+    if (!notingEvent || noteValue < 1) return;
+    try {
+      await api.post(`/evenements/${notingEvent}/noter`, { note: noteValue });
+      flash('success', 'Note enregistrée !'); setNotingEvent(null); setNoteValue(0);
+    } catch (err) { flash('error', err.response?.data?.message || 'Erreur notation'); }
   };
 
   const getNiveau = (pts) => {
@@ -533,6 +606,7 @@ const DashboardUser = () => {
             { key: 'connexions', label: 'Connexions',        count: connexions.demandes_recues?.length||0, color: '#ec4899' },
             { key: 'explorer',   label: 'Explorer',          count: evenementsDispos.length,                    color: '' },
             { key: 'creations', label: 'Mes créations', count: mesCreations.length, color: '#9c27b0' },
+            { key: 'equipes',   label: '👥 Équipes IA', count: 0, color: '#00d4ff' },
             { key: 'recompenses', label: 'Récompenses', count: mesRecompenses.filter(r => !r.is_redeemed).length, color: '#ff6b00' },
             { key: 'profil',      label: 'Mon profil',  count: 0, color: '' },
           ].map(t => (
@@ -579,6 +653,22 @@ const DashboardUser = () => {
                       }}>
                       👥 Participants
                     </button>
+                    {ins.is_present && (
+                      <button
+                        onClick={() => { setNotingEvent(ins.eventId); setNoteValue(0); }}
+                        style={{
+                          width: '100%', padding: '8px 12px',
+                          background: 'rgba(255,215,0,.07)',
+                          border: '1px solid rgba(255,215,0,.2)',
+                          borderRadius: '8px', color: '#ffd700',
+                          fontSize: '12px', cursor: 'pointer',
+                          fontFamily: 'Poppins,sans-serif',
+                          display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', gap: '6px',
+                        }}>
+                        ⭐ Noter
+                      </button>
+                    )}
                     {/* Bouton d'accès à la galerie photos de cet événement */}
                     <button
                       onClick={() => ouvrirGalerieEvent(ins.eventId, ins.titre)}
@@ -799,6 +889,142 @@ const DashboardUser = () => {
             </div>
           )}
 
+          {/* ── Équipes IA ── */}
+          {activeTab === 'equipes' && (
+            <div>
+              <h2 className="dash-section-title" style={{ marginBottom: '1.5rem' }}>Formation automatique d'équipes</h2>
+
+              <div style={{ background: '#12122a', border: '1px solid #2a2a4a', borderRadius: 14, padding: '1.25rem', marginBottom: 24 }}>
+                <h3 style={{ fontSize: 13, fontWeight: 700, color: '#e8e8f0', marginBottom: 14 }}>
+                  Paramètres de génération
+                </h3>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={{ flex: 2, minWidth: 200 }}>
+                    <label style={{ display: 'block', fontSize: 12, color: '#8888aa', marginBottom: 6 }}>
+                      Événement *
+                    </label>
+                    <select
+                      value={equipeEventId}
+                      onChange={e => { setEquipeEventId(e.target.value); setEquipesSuggeres([]); }}
+                      style={{ width: '100%', background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 8, padding: '9px 12px', fontFamily: 'Poppins,sans-serif', fontSize: 13, boxSizing: 'border-box' }}
+                    >
+                      <option value="">— Sélectionner un de vos événements —</option>
+                      {mesCreations.map(ev => (
+                        <option key={ev._id} value={ev._id}>{ev.title_event}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <label style={{ display: 'block', fontSize: 12, color: '#8888aa', marginBottom: 6 }}>
+                      Membres / équipe
+                    </label>
+                    <input
+                      type="number" min={2} max={20}
+                      value={tailleEquipe}
+                      onChange={e => setTailleEquipe(Math.max(2, parseInt(e.target.value) || 4))}
+                      style={{ width: '100%', background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 8, padding: '9px 12px', fontFamily: 'Poppins,sans-serif', fontSize: 13, boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <button
+                    onClick={genererEquipes}
+                    disabled={!equipeEventId || loadingEquipes}
+                    style={{
+                      padding: '10px 20px', borderRadius: 8, fontSize: 13,
+                      fontFamily: 'Poppins,sans-serif', fontWeight: 600,
+                      cursor: !equipeEventId || loadingEquipes ? 'not-allowed' : 'pointer',
+                      background: !equipeEventId || loadingEquipes ? '#1a1a35' : 'rgba(0,212,255,.12)',
+                      color: !equipeEventId || loadingEquipes ? '#555577' : '#00d4ff',
+                      border: `1px solid ${!equipeEventId || loadingEquipes ? '#2a2a4a' : 'rgba(0,212,255,.3)'}`,
+                    }}
+                  >
+                    {loadingEquipes ? '⏳ Calcul en cours...' : '🤖 Générer les équipes IA'}
+                  </button>
+                </div>
+              </div>
+
+              {equipesSuggeres.length > 0 && (
+                <div>
+                  <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(0,212,255,.06)', border: '1px solid rgba(0,212,255,.18)', borderRadius: 10, fontSize: 12, color: '#8888aa', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#00d4ff', fontSize: 14 }}>ℹ</span>
+                    Prévisualisation — rien n'est sauvegardé tant que vous ne cliquez pas sur "Valider".
+                    Cliquez sur <strong style={{ color: '#e8e8f0' }}>✕</strong> pour retirer un membre (redistribué automatiquement).
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14, marginBottom: 20 }}>
+                    {equipesSuggeres.map((eq, eqIdx) => (
+                      <div key={eqIdx} style={{ background: '#12122a', border: '1px solid #2a2a4a', borderRadius: 14, padding: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: '#e8e8f0' }}>{eq.nom}</span>
+                          <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, background: 'rgba(0,212,255,.1)', color: '#00d4ff', fontWeight: 700 }}>
+                            Score {Math.round((eq.score_moyen || 0) * 100)}%
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {eq.membres.map(m => (
+                            <div key={String(m._id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', background: '#0a0a1a', borderRadius: 8 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#1a1a35', border: '1px solid #2a2a4a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#8888aa', flexShrink: 0 }}>
+                                  {m.first_name?.[0]}{m.last_name?.[0]}
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 12, color: '#e8e8f0', lineHeight: 1.2 }}>{m.first_name} {m.last_name}</div>
+                                  <div style={{ fontSize: 10, color: '#555577' }}>{m.niveau} · {m.cumul_points} pts</div>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => retirerMembreEquipe(eqIdx, m._id)}
+                                title="Retirer de cette équipe"
+                                style={{ background: 'none', border: 'none', color: '#555577', cursor: 'pointer', fontSize: 14, padding: '2px 6px', lineHeight: 1 }}
+                              >✕</button>
+                            </div>
+                          ))}
+                          {!eq.complet && (
+                            <div style={{ fontSize: 11, color: '#ff6b00', textAlign: 'center', padding: '4px 0' }}>
+                              ⚠ Équipe incomplète
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', paddingTop: 12, borderTop: '1px solid #2a2a4a' }}>
+                    <button
+                      onClick={() => setEquipesSuggeres([])}
+                      className="dash-btn-ghost"
+                      disabled={savingEquipes}
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      onClick={validerEtNotifier}
+                      disabled={savingEquipes}
+                      style={{
+                        padding: '10px 20px', borderRadius: 8, fontSize: 13,
+                        fontFamily: 'Poppins,sans-serif', fontWeight: 600,
+                        cursor: savingEquipes ? 'not-allowed' : 'pointer',
+                        background: savingEquipes ? '#1a1a35' : 'rgba(0,230,118,.12)',
+                        color: savingEquipes ? '#555577' : '#00e676',
+                        border: `1px solid ${savingEquipes ? '#2a2a4a' : 'rgba(0,230,118,.3)'}`,
+                      }}
+                    >
+                      {savingEquipes ? '⏳ Sauvegarde...' : '✅ Valider et notifier les membres'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!loadingEquipes && equipesSuggeres.length === 0 && (
+                <div className="dash-empty">
+                  <p className="dash-empty__icon">👥</p>
+                  <p className="dash-empty__text">
+                    Sélectionnez un de vos événements et cliquez sur "Générer" pour obtenir des suggestions d'équipes basées sur les affinités des participants.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── Mon profil ── */}
           {activeTab === 'profil' && (
             <div style={{ maxWidth: '520px' }}>
@@ -877,6 +1103,23 @@ const DashboardUser = () => {
       {qrModal && <QRModal token={qrModal.token} titre={qrModal.titre} onClose={() => setQrModal(null)} />}
       {participantsModal && <ParticipantsModal evenementId={participantsModal} onClose={() => setParticipantsModal(null)} />}
       {galerieOpen && <GalerieModal onClose={() => setGalerieOpen(false)} isAdmin={false} />}
+
+      {notingEvent && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setNotingEvent(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#1e1e2e', borderRadius: 16, padding: 28, minWidth: 280, textAlign: 'center' }}>
+            <h3 style={{ color: '#e8e8f0', marginBottom: 16, fontSize: 16 }}>⭐ Noter cet événement</h3>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 20 }}>
+              {[1, 2, 3, 4, 5].map(n => (
+                <button key={n} onClick={() => setNoteValue(n)} style={{ fontSize: 28, background: 'none', border: 'none', cursor: 'pointer', opacity: n <= noteValue ? 1 : 0.3 }}>⭐</button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <button className="dash-btn-primary" onClick={soumettreNote} disabled={noteValue === 0}>Enregistrer</button>
+              <button className="dash-btn-ghost" onClick={() => setNotingEvent(null)}>Annuler</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Modale galerie d'un événement spécifique ── */}
       {galerieEvent && (

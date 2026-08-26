@@ -13,6 +13,7 @@ import '../../styles/dashboard/organisateur.css';
 import { fmtDate, fmtHeure, fmtDateHeure } from '../../utils/dates';
 import GalerieModal from '../../components/dashboard/GalerieModal';
 import ParticipantsModal from '../../components/dashboard/ParticipantsModal';
+import PhotoGallery from '../../components/PhotoGallery';
 import ThemeSelector from '../../components/dashboard/ThemeSelector';
 
 const mkDates = () => {
@@ -67,6 +68,11 @@ const DashboardOrganisateur = () => {
     const [suggestions, setSuggestions]           = useState([]);
     const [qrModal, setQrModal]                   = useState(null);
     const [participantsModal, setParticipantsModal] = useState(null);
+    const [notingEvent, setNotingEvent]           = useState(null);
+    const [noteValue, setNoteValue]               = useState(0);
+    const [photosModal, setPhotosModal]           = useState(null);
+    const [photosData, setPhotosData]             = useState({});
+    const [uploadingPhoto, setUploadingPhoto]     = useState({});
 
     // ── Gestion des catégories / suggestions de sports ───────
     const [suggestionsCats, setSuggestionsCats]   = useState([]);
@@ -325,6 +331,35 @@ const DashboardOrganisateur = () => {
         } catch (err) {
             notif('error', err.response?.data?.message || 'Erreur annulation');
         }
+    };
+
+    const ouvrirPhotos = async (eventId) => {
+        setPhotosModal(eventId);
+        if (!photosData[eventId]) {
+            try {
+                const r = await api.get(`/medias/evenement/${eventId}`);
+                setPhotosData(p => ({ ...p, [eventId]: r.data.medias || [] }));
+            } catch { setPhotosData(p => ({ ...p, [eventId]: [] })); }
+        }
+    };
+
+    const uploaderPhoto = async (eventId, file) => {
+        setUploadingPhoto(p => ({ ...p, [eventId]: true }));
+        try {
+            const fd = new FormData();
+            fd.append('photo', file); fd.append('type_media', 'photo_evenement'); fd.append('evenement_id', eventId);
+            const r = await api.post('/medias/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+            if (r.data.success) { setPhotosData(p => ({ ...p, [eventId]: [...(p[eventId] || []), r.data.media] })); notif('success', 'Photo ajoutée !'); }
+        } catch { notif('error', 'Erreur upload photo'); }
+        setUploadingPhoto(p => ({ ...p, [eventId]: false }));
+    };
+
+    const soumettreNote = async () => {
+        if (!notingEvent || noteValue < 1) return;
+        try {
+            await api.post(`/evenements/${notingEvent}/noter`, { note: noteValue });
+            notif('success', 'Note enregistrée !'); setNotingEvent(null); setNoteValue(0);
+        } catch (err) { notif('error', err.response?.data?.message || 'Erreur notation'); }
     };
 
     // ── Soumettre un token QR pour valider une présence ──
@@ -1402,7 +1437,7 @@ const DashboardOrganisateur = () => {
                                         style={{ width: '100%', background: '#1a1a35', color: '#e8e8f0', border: '1px solid #2a2a4a', borderRadius: 8, padding: '9px 12px', fontFamily: 'Poppins,sans-serif', fontSize: 13, boxSizing: 'border-box' }}
                                     >
                                         <option value="">— Sélectionner un événement —</option>
-                                        {mesEvents.filter(ev => ['publié', 'brouillon'].includes(ev.stat_event)).map(ev => (
+                                        {mesEvents.filter(ev => ev.stat_event === 'publié').map(ev => (
                                             <option key={ev._id} value={ev._id}>{ev.title_event}</option>
                                         ))}
                                     </select>
@@ -1770,12 +1805,23 @@ const DashboardOrganisateur = () => {
                                             </button>
                                             <button className="dash-btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
                                                 onClick={() => setParticipantsModal(ins.eventId)}>👥 Participants</button>
-                                            <button onClick={() => annulerInscription(ins.eventId)}
-                                                style={{ fontSize: 12, padding: '5px 10px', background: 'rgba(255,77,109,.1)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
-                                                Annuler
-                                            </button>
+                                            <button className="dash-btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
+                                                onClick={() => ouvrirPhotos(ins.eventId)}>📷 Photos</button>
+                                            {ins.is_present && (
+                                                <button className="dash-btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
+                                                    onClick={() => { setNotingEvent(ins.eventId); setNoteValue(0); }}>⭐ Noter</button>
+                                            )}
+                                            {!['terminé', 'annulé'].includes(ins.stat_event) && (
+                                                <button onClick={() => annulerInscription(ins.eventId)}
+                                                    style={{ fontSize: 12, padding: '5px 10px', background: 'rgba(255,77,109,.1)', color: '#ff4d6d', border: '1px solid rgba(255,77,109,.3)', borderRadius: 6, cursor: 'pointer', fontFamily: 'Poppins,sans-serif' }}>
+                                                    Annuler
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
+                                    {photosModal === ins.eventId && (
+                                        <PhotoGallery photos={photosData[ins.eventId] || []} peutAjouter={true} uploading={!!uploadingPhoto[ins.eventId]} onAjouter={(file) => uploaderPhoto(ins.eventId, file)} />
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -1913,6 +1959,23 @@ const DashboardOrganisateur = () => {
             </main>
             {qrModal && <QRModal token={qrModal.token} titre={qrModal.titre} qr_utilise={qrModal.qr_utilise} onClose={() => setQrModal(null)} />}
             {participantsModal && <ParticipantsModal evenementId={participantsModal} onClose={() => setParticipantsModal(null)} />}
+
+            {notingEvent && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setNotingEvent(null)}>
+                    <div onClick={e => e.stopPropagation()} style={{ background: '#1e1e2e', borderRadius: 16, padding: 28, minWidth: 280, textAlign: 'center' }}>
+                        <h3 style={{ color: '#e8e8f0', marginBottom: 16, fontSize: 16 }}>⭐ Noter cet événement</h3>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 20 }}>
+                            {[1, 2, 3, 4, 5].map(n => (
+                                <button key={n} onClick={() => setNoteValue(n)} style={{ fontSize: 28, background: 'none', border: 'none', cursor: 'pointer', opacity: n <= noteValue ? 1 : 0.3 }}>⭐</button>
+                            ))}
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                            <button className="dash-btn-primary" onClick={soumettreNote} disabled={noteValue === 0}>Enregistrer</button>
+                            <button className="dash-btn-ghost" onClick={() => setNotingEvent(null)}>Annuler</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ── MODAL ANNULATION ÉVÉNEMENT (orga/admin) ── */}
             {modalAnnulerEv && (
